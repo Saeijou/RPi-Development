@@ -9,17 +9,17 @@ import logging
 import socket
 import configparser
 
-logging.basicConfig(filename='/home/pi/Python/Scripts/script_runner.log', level=logging.INFO,
+# Read config
+config = configparser.ConfigParser()
+config.read(os.path.expanduser('~/Python/.config'))
+
+logging.basicConfig(filename=config['Paths']['log_file'], level=logging.INFO,
                     format='%(asctime)s:%(levelname)s:%(message)s')
 
 logging.info("Starting script execution...")
 time.sleep(30)
 
-script_dir = "/home/pi/Python/Scripts"
-
-# Read config
-config = configparser.ConfigParser()
-config.read('/home/pi/Python/.config')
+script_dir = config['Paths']['scripts_folder']
 
 # Get email settings from config
 sender_email = config['Email']['sender_email']

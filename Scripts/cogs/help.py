@@ -8,21 +8,30 @@ class BotCapabilities(commands.Cog):
     @commands.command(name="bothelp")
     async def display_help(self, ctx):
         embed = discord.Embed(
-            title="Bot Capabilities",
-            description="Here's what I can do:",
+            title="Bot Commands",
+            description="Here are all available commands:",
             color=discord.Color.blue()
         )
 
         command_list = [
-            ("!ai [phrase]", "Ask Claude AI a question or give it a task. Only authorized users can use this command."),
-            ("!aistats", "View your total AI usage statistics, including token count and estimated cost. Only authorized users can use this command."),
-            ("!bothelp", "Display this help message showing all available commands.")
+            ("!bothelp", "Display this help message showing all available commands."),
+            ("!ai [phrase]", "Ask Claude AI a question or give it a task. (Authorized users only)"),
+            ("!aistats", "View your total AI usage statistics. (Authorized users only)"),
+            ("!google [query]", "Search Google and return top 3 results."),
+            ("!image [query]", "Search for an image on Google and return the first result."),
+            ("!joke", "Tell a random joke."),
+            ("!load [cog]", "Load a specific cog. (Bot owner only)"),
+            ("!unload [cog]", "Unload a specific cog. (Bot owner only)"),
+            ("!reload [cog]", "Reload a specific cog. (Bot owner only)"),
+            ("!list_cogs", "List all available cogs and their status. (Bot owner only)"),
+            ("!botlog", "View the last 24 hours of bot.log entries. (Bot owner only)"),
+            ("!scriptlog", "View the last 24 hours of script_runner.log entries. (Bot owner only)")
         ]
 
         for command, description in command_list:
             embed.add_field(name=command, value=description, inline=False)
 
-        embed.set_footer(text="Note: Some commands are restricted to authorized users only.")
+        embed.set_footer(text="Note: Some commands are restricted to authorized users or the bot owner only.")
 
         await ctx.send(embed=embed)
 

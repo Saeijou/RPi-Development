@@ -5,14 +5,15 @@ import asyncio
 import logging
 from collections import defaultdict
 import configparser
-
-# Configure logging
-logging.basicConfig(filename='/home/pi/Python/Scripts/bot.log', level=logging.INFO, 
-                    format='%(asctime)s:%(levelname)s:%(message)s')
+import os
 
 # Read config
 config = configparser.ConfigParser()
-config.read('/home/pi/Python/.config')
+config.read(os.path.expanduser('~/Python/.config'))
+
+# Configure logging
+logging.basicConfig(filename=config['Paths']['bot_log_file'], level=logging.INFO, 
+                    format='%(asctime)s:%(levelname)s:%(message)s')
 
 KEY = config['Anthropic']['API-KEY']
 

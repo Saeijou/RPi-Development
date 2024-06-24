@@ -1,10 +1,16 @@
 import discord
 from discord.ext import commands
 import os
+import configparser
+
+# Read config
+config = configparser.ConfigParser()
+config.read(os.path.expanduser('~/Python/.config'))
 
 class CogManager(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
+        self.cogs_dir = config['Paths']['cogs_folder']
 
     @commands.command()
     @commands.is_owner()
@@ -36,7 +42,7 @@ class CogManager(commands.Cog):
     @commands.command()
     @commands.is_owner()
     async def list_cogs(self, ctx):
-        cogs = [f[:-3] for f in os.listdir('./cogs') if f.endswith('.py')]
+        cogs = [f[:-3] for f in os.listdir(self.cogs_dir) if f.endswith('.py')]
         loaded_cogs = [ext.split('.')[-1] for ext in self.bot.extensions]
         cog_list = [f"{cog} ({'Loaded' if cog in loaded_cogs else 'Unloaded'})" for cog in cogs]
         await ctx.send("Available cogs:\n" + "\n".join(cog_list))

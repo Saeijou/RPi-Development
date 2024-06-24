@@ -2,10 +2,11 @@ import discord
 from discord.ext import commands
 import aiohttp
 import configparser
+import os
 
 # Read config
 config = configparser.ConfigParser()
-config.read('/home/pi/Python/.config')
+config.read(os.path.expanduser('~/Python/.config'))
 
 class GoogleSearch(commands.Cog):
     def __init__(self, bot):

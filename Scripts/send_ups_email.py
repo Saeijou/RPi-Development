@@ -3,10 +3,11 @@ from email.mime.text import MIMEText
 import sys
 import subprocess
 import configparser
+import os
 
 # Read config
 config = configparser.ConfigParser()
-config.read('/home/pi/Python/.config')
+config.read(os.path.expanduser('~/Python/.config'))
 
 # Get email settings from config
 sender_email = config['Email']['sender_email']

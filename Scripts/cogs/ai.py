@@ -6,34 +6,49 @@ import logging
 from collections import defaultdict
 import configparser
 import os
-
-# Read config
-config = configparser.ConfigParser()
-config.read(os.path.expanduser('~/Python/.config'))
+from typing import Dict, Any
+from discord.ext import commands
+import time
 
 # Configure logging
 logging.basicConfig(filename=config['Paths']['bot_log_file'], level=logging.INFO, 
                     format='%(asctime)s:%(levelname)s:%(message)s')
 
-KEY = config['Anthropic']['API-KEY']
+# Read config
+config = configparser.ConfigParser()
+config.read(os.path.expanduser('~/Python/.config'))
+
+KEY = os.environ.get('ANTHROPIC_API_KEY') or config['Anthropic']['API-KEY']
 
 class ClaudeAI(commands.Cog):
-    def __init__(self, bot):
+    """A cog for interacting with Claude AI."""
+
+    def __init__(self, bot: commands.Bot):
         self.bot = bot
         self.claude = anthropic.Anthropic(api_key=KEY)
-        self.allowed_users = ["saeijou", "aassdd"]
-        self.input_cost_per_1m_tokens = 3  # $3 per 1M input tokens
-        self.output_cost_per_1m_tokens = 15  # $15 per 1M output tokens
-        self.user_stats = defaultdict(lambda: {"total_input_tokens": 0, "total_output_tokens": 0, "total_cost": 0.0})
+        self.allowed_users = config['AI']['allowed_users'].split(',')
+        self.input_cost_per_1m_tokens = float(config['AI']['input_cost_per_1m_tokens'])
+        self.output_cost_per_1m_tokens = float(config['AI']['output_cost_per_1m_tokens'])
+        self.user_stats: Dict[str, Dict[str, Any]] = defaultdict(lambda: {"total_input_tokens": 0, "total_output_tokens": 0, "total_cost": 0.0, "last_use": 0})
+        self.rate_limit = float(config['AI']['rate_limit'])  # in seconds
         logging.info("ClaudeAI module loaded")
 
     @commands.command(name="ai")
-    async def ai_response(self, ctx, *, phrase: str):
+    async def ai_response(self, ctx: commands.Context, *, phrase: str):
+        """Generate a response using Claude AI."""
         logging.info(f"Command 'ai' used by {ctx.author.name} with question: {phrase}")
+        
         if ctx.author.name.lower() not in self.allowed_users:
             await ctx.send("Sorry, you're not authorized to use this command.")
             logging.warning(f"Unauthorized 'ai' command attempt by {ctx.author.name}")
             return
+
+        # Rate limiting
+        current_time = time.time()
+        if current_time - self.user_stats[ctx.author.name.lower()]["last_use"] < self.rate_limit:
+            await ctx.send(f"Please wait {self.rate_limit} seconds between requests.")
+            return
+        self.user_stats[ctx.author.name.lower()]["last_use"] = current_time
 
         try:
             message = await ctx.send("Thinking...")
@@ -70,12 +85,16 @@ class ClaudeAI(commands.Cog):
             
             logging.info(f"AI response given to {ctx.author.name}: {ai_response}")
 
+        except anthropic.APIError as e:
+            await ctx.send(f"An error occurred with the AI service: {str(e)}")
+            logging.error(f"Anthropic API error in 'ai' command used by {ctx.author.name}: {e}")
         except Exception as e:
-            await ctx.send(f"Sorry, I encountered an error: {str(e)}")
-            logging.error(f"Error in 'ai' command used by {ctx.author.name}: {e}")
+            await ctx.send("An unexpected error occurred. Please try again later.")
+            logging.error(f"Unexpected error in 'ai' command used by {ctx.author.name}: {e}")
 
     @commands.command(name="aistats")
-    async def ai_stats(self, ctx):
+    async def ai_stats(self, ctx: commands.Context):
+        """View AI usage statistics."""
         logging.info(f"Command 'aistats' used by {ctx.author.name}")
         if ctx.author.name.lower() not in self.allowed_users:
             await ctx.send("Sorry, you're not authorized to use this command.")
@@ -93,6 +112,6 @@ class ClaudeAI(commands.Cog):
                        f"Total estimated cost: ${total_cost:.6f}")
         logging.info(f"AI stats provided to {ctx.author.name}")
 
-async def setup(bot):
+async def setup(bot: commands.Bot):
     await bot.add_cog(ClaudeAI(bot))
     logging.info("ClaudeAI cog added to the bot")

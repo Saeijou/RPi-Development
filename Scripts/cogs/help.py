@@ -23,6 +23,7 @@ class BotCapabilities(commands.Cog):
             "Fun": CommandCategory("Fun", "Fun and entertainment commands", []),
             "Admin": CommandCategory("Admin", "Administrative commands", []),
             "Logs": CommandCategory("Logs", "Log viewing commands", []),
+            "Music": CommandCategory("Music", "Music playback commands", []),
         }
 
         for command in self.bot.commands:
@@ -36,6 +37,8 @@ class BotCapabilities(commands.Cog):
                 categories["Admin"].commands.append(command)
             elif command.cog_name == "LogViewer":
                 categories["Logs"].commands.append(command)
+            elif command.cog_name == "Music":
+                categories["Music"].commands.append(command)
             else:
                 categories["General"].commands.append(command)
 
@@ -49,9 +52,13 @@ class BotCapabilities(commands.Cog):
         Usage:
         !bothelp           - Show all command categories
         !bothelp <command> - Show detailed help for a specific command
+        !bothelp music     - Show an explanation of the music functionality
         """
         if command_name:
-            await self._show_command_help(ctx, command_name)
+            if command_name.lower() == "music":
+                await self._show_music_explanation(ctx)
+            else:
+                await self._show_command_help(ctx, command_name)
         else:
             await self._show_categories(ctx)
 
@@ -67,6 +74,7 @@ class BotCapabilities(commands.Cog):
                 command_list = ", ".join(f"`{cmd.name}`" for cmd in category.commands)
                 embed.add_field(name=category.name, value=f"{category.description}\nCommands: {command_list}", inline=False)
 
+        embed.add_field(name="Music Functionality", value="Use `!bothelp music` for an explanation of how the music bot works.", inline=False)
         embed.set_footer(text="Note: Some commands are restricted to authorized users or the bot owner only.")
         await ctx.send(embed=embed)
 
@@ -92,6 +100,23 @@ class BotCapabilities(commands.Cog):
         if isinstance(command, commands.Group):
             subcommands = "\n".join(f"`{c.name}`: {c.short_doc or 'No description'}" for c in command.commands)
             embed.add_field(name="Subcommands", value=subcommands or "No subcommands", inline=False)
+
+        await ctx.send(embed=embed)
+
+    async def _show_music_explanation(self, ctx: commands.Context):
+        embed = discord.Embed(
+            title="Music Bot Functionality",
+            description="Here's how the music bot works:",
+            color=discord.Color.purple()
+        )
+
+        embed.add_field(name="Requesting Songs", value="Use `!play <song name or URL>` to request a song. The bot will search YouTube and add the song to the queue.", inline=False)
+        embed.add_field(name="Queue System", value="Songs are added to a queue. If no song is playing, the bot will immediately play the requested song. Otherwise, it will be added to the queue.", inline=False)
+        embed.add_field(name="Viewing the Queue", value="Use `!queue` to see the list of upcoming songs.", inline=False)
+        embed.add_field(name="Skipping Songs", value="Use `!skip` to skip the current song and play the next one in the queue.", inline=False)
+        embed.add_field(name="Stopping Playback", value="Use `!stop` to stop the current playback and clear the queue.", inline=False)
+        embed.add_field(name="Disconnecting", value="Use `!leave` to make the bot leave the voice channel and clear the queue.", inline=False)
+        embed.add_field(name="Note", value="The bot can only play in one voice channel per server at a time. It will automatically move to your channel if you use a command while in a different voice channel.", inline=False)
 
         await ctx.send(embed=embed)
 

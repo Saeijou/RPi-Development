@@ -3,10 +3,8 @@
 import os
 import subprocess
 import time
-import smtplib
-from email.mime.text import MIMEText
 import logging
-import socket
+import requests
 import configparser
 
 # Read config
@@ -21,13 +19,13 @@ time.sleep(30)
 
 script_dir = config['Paths']['scripts_folder']
 
-# Get email settings from config
+# Get Zoho email settings from config
+access_token = config['Zoho']['access_token']
+refresh_token = config['Zoho']['refresh_token']
+client_id = config['Zoho']['client_id']
+client_secret = config['Zoho']['client_secret']
 sender_email = config['Email']['sender_email']
 receiver_email = config['Email']['receiver_email']
-smtp_server = config['Email']['smtp_server']
-smtp_port = int(config['Email']['smtp_port'])
-smtp_username = config['Email']['smtp_username']
-smtp_password = config['Email']['smtp_password']
 
 successful_scripts = []
 failed_scripts = []
@@ -68,21 +66,69 @@ if failed_scripts:
     report.append("\nFailed Scripts:")
     report.extend(failed_scripts)
 
+def refresh_access_token():
+    global access_token
+    response = requests.post('https://accounts.zoho.com/oauth/v2/token', data={
+        'grant_type': 'refresh_token',
+        'client_id': client_id,
+        'client_secret': client_secret,
+        'refresh_token': refresh_token
+    })
+    if response.status_code == 200:
+        access_token = response.json().get('access_token')
+        logging.info("Access token refreshed successfully.")
+    else:
+        logging.error(f"Failed to refresh access token: {response.content}")
+
+def get_account_id():
+    headers = {
+        'Authorization': f'Zoho-oauthtoken {access_token}'
+    }
+    response = requests.get('https://mail.zoho.com/api/accounts', headers=headers)
+    if response.status_code == 200:
+        accounts = response.json().get('data')
+        if accounts:
+            return accounts[0].get('accountId')
+        else:
+            logging.error('No accounts found')
+            return None
+    else:
+        logging.error(f"Failed to get accounts: {response.content}")
+        return None
+
+def send_email(report):
+    account_id = get_account_id()
+    if not account_id:
+        return
+
+    headers = {
+        'Authorization': f'Zoho-oauthtoken {access_token}',
+        'Content-Type': 'application/json'
+    }
+
+    email_data = {
+        'fromAddress': sender_email,
+        'toAddress': receiver_email,
+        'subject': 'Script Execution Report',
+        'content': '\n'.join(report)
+    }
+
+    response = requests.post(f'https://mail.zoho.com/api/accounts/{account_id}/messages', headers=headers, json=email_data)
+
+    if response.status_code == 401:  # Unauthorized, possibly due to expired access token
+        logging.info("Access token expired, refreshing...")
+        refresh_access_token()
+        headers['Authorization'] = f'Zoho-oauthtoken {access_token}'
+        response = requests.post(f'https://mail.zoho.com/api/accounts/{account_id}/messages', headers=headers, json=email_data)
+
+    if response.status_code == 200:
+        logging.info("Email report sent successfully.")
+    else:
+        logging.error(f"Failed to send email: {response.content}")
+
 if report:
     try:
-        message = MIMEText("\n".join(report))
-        message["Subject"] = "Script Execution Report"
-        message["From"] = sender_email
-        message["To"] = receiver_email
-        
-        socket.setdefaulttimeout(30)
-        
-        server = smtplib.SMTP(smtp_server, smtp_port, timeout=30)
-        server.starttls()
-        server.login(smtp_username, smtp_password)
-        server.send_message(message)
-        server.quit()
-        logging.info("Email report sent successfully.")
+        send_email(report)
     except Exception as e:
         logging.error(f"Failed to send email report: {str(e)}")
 else:

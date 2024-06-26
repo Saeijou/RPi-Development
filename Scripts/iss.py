@@ -1,9 +1,9 @@
 import requests
 from datetime import datetime
-import smtplib
 import time
 import configparser
 import os
+import logging
 from requests.exceptions import RequestException
 from urllib3.exceptions import ProtocolError
 
@@ -11,12 +11,80 @@ from urllib3.exceptions import ProtocolError
 config = configparser.ConfigParser()
 config.read(os.path.expanduser('~/Python/.config'))
 
-my_email = config['Email']['sender_email']
-password = config['Email']['smtp_password']
-port = int(config['Email']['smtp_port'])
+# Logging setup
+logging.basicConfig(filename=config['Paths']['log_file'], level=logging.INFO,
+                    format='%(asctime)s:%(levelname)s:%(message)s')
+
+# Zoho email settings
+access_token = config['Zoho']['access_token']
+refresh_token = config['Zoho']['refresh_token']
+client_id = config['Zoho']['client_id']
+client_secret = config['Zoho']['client_secret']
+sender_email = config['Email']['sender_email']
+receiver_email = config['Email']['receiver_email']
 
 MY_LAT = 38.661750  # Your latitude
 MY_LONG = -121.269265  # Your longitude
+
+def refresh_access_token():
+    global access_token
+    response = requests.post('https://accounts.zoho.com/oauth/v2/token', data={
+        'grant_type': 'refresh_token',
+        'client_id': client_id,
+        'client_secret': client_secret,
+        'refresh_token': refresh_token
+    })
+    if response.status_code == 200:
+        access_token = response.json().get('access_token')
+        logging.info("Access token refreshed successfully.")
+    else:
+        logging.error(f"Failed to refresh access token: {response.content}")
+
+def get_account_id():
+    headers = {
+        'Authorization': f'Zoho-oauthtoken {access_token}'
+    }
+    response = requests.get('https://mail.zoho.com/api/accounts', headers=headers)
+    if response.status_code == 200:
+        accounts = response.json().get('data')
+        if accounts:
+            return accounts[0].get('accountId')
+        else:
+            logging.error('No accounts found')
+            return None
+    else:
+        logging.error(f"Failed to get accounts: {response.content}")
+        return None
+
+def send_email():
+    account_id = get_account_id()
+    if not account_id:
+        return
+
+    headers = {
+        'Authorization': f'Zoho-oauthtoken {access_token}',
+        'Content-Type': 'application/json'
+    }
+
+    email_data = {
+        'fromAddress': sender_email,
+        'toAddress': receiver_email,
+        'subject': 'ISS IS ABOVE YOU!!',
+        'content': 'LOOK UP!'
+    }
+
+    response = requests.post(f'https://mail.zoho.com/api/accounts/{account_id}/messages', headers=headers, json=email_data)
+
+    if response.status_code == 401:  # Unauthorized, possibly due to expired access token
+        logging.info("Access token expired, refreshing...")
+        refresh_access_token()
+        headers['Authorization'] = f'Zoho-oauthtoken {access_token}'
+        response = requests.post(f'https://mail.zoho.com/api/accounts/{account_id}/messages', headers=headers, json=email_data)
+
+    if response.status_code == 200:
+        logging.info("Email sent successfully.")
+    else:
+        logging.error(f"Failed to send email: {response.content}")
 
 def get_iss_position(max_retries=3, retry_delay=5):
     for attempt in range(max_retries):
@@ -27,10 +95,10 @@ def get_iss_position(max_retries=3, retry_delay=5):
             return float(data["iss_position"]["latitude"]), float(data["iss_position"]["longitude"])
         except (RequestException, ProtocolError) as e:
             if attempt < max_retries - 1:
-                print(f"Error fetching ISS position. Retrying in {retry_delay} seconds...")
+                logging.warning(f"Error fetching ISS position. Retrying in {retry_delay} seconds...")
                 time.sleep(retry_delay)
             else:
-                print(f"Failed to fetch ISS position after {max_retries} attempts. Error: {e}")
+                logging.error(f"Failed to fetch ISS position after {max_retries} attempts. Error: {e}")
                 return None, None
 
 def get_sun_times(max_retries=3, retry_delay=5):
@@ -49,10 +117,10 @@ def get_sun_times(max_retries=3, retry_delay=5):
             return sunrise, sunset
         except (RequestException, ProtocolError) as e:
             if attempt < max_retries - 1:
-                print(f"Error fetching sun times. Retrying in {retry_delay} seconds...")
+                logging.warning(f"Error fetching sun times. Retrying in {retry_delay} seconds...")
                 time.sleep(retry_delay)
             else:
-                print(f"Failed to fetch sun times after {max_retries} attempts. Error: {e}")
+                logging.error(f"Failed to fetch sun times after {max_retries} attempts. Error: {e}")
                 return None, None
 
 def iss_in_range(iss_latitude, iss_longitude):
@@ -61,20 +129,6 @@ def iss_in_range(iss_latitude, iss_longitude):
 def is_dark(sunrise, sunset):
     time_now = datetime.now().hour
     return time_now <= sunrise or time_now >= sunset
-
-def send_email():
-    try:
-        with smtplib.SMTP("smtp.gmail.com", port, timeout=30) as connection:
-            connection.starttls()
-            connection.login(user=my_email, password=password)
-            connection.sendmail(
-                from_addr=my_email,
-                to_addrs=config['Email']['receiver_email'],
-                msg="Subject:ISS IS ABOVE YOU!!\n\nLOOK UP!"
-            )
-        print("Email sent successfully")
-    except Exception as e:
-        print(f"Failed to send email. Error: {e}")
 
 def main():
     while True:

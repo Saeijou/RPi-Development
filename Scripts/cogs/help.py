@@ -21,8 +21,6 @@ class BotCapabilities(commands.Cog):
             "AI": CommandCategory("AI", "AI-related commands", []),
             "Search": CommandCategory("Search", "Search-related commands", []),
             "Fun": CommandCategory("Fun", "Fun and entertainment commands", []),
-            "Admin": CommandCategory("Admin", "Administrative commands", []),
-            "Logs": CommandCategory("Logs", "Log viewing commands", []),
             "Music": CommandCategory("Music", "Music playback commands", []),
             "Games": CommandCategory("Games", "Interactive game commands", []),
         }
@@ -34,15 +32,11 @@ class BotCapabilities(commands.Cog):
                 categories["Search"].commands.append(command)
             elif command.cog_name == "JokePoster":
                 categories["Fun"].commands.append(command)
-            elif command.cog_name == "CogManager":
-                categories["Admin"].commands.append(command)
-            elif command.cog_name == "LogViewer":
-                categories["Logs"].commands.append(command)
             elif command.cog_name == "Music":
                 categories["Music"].commands.append(command)
             elif command.cog_name == "TriviaCog":
                 categories["Games"].commands.append(command)
-            else:
+            elif command.cog_name not in ["CogManager", "LogViewer"]:
                 categories["General"].commands.append(command)
 
         return categories

@@ -10,13 +10,42 @@ from datetime import timedelta, datetime
 class TriviaCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        self.api_url = "https://opentdb.com/api.php?amount=1"
+        self.base_url = "https://opentdb.com/api.php?amount=1"
         self.active_games = {}
         self.cooldowns = {}
+        self.categories = {
+            "General Knowledge": 9,
+            "Entertainment: Books": 10,
+            "Entertainment: Film": 11,
+            "Entertainment: Music": 12,
+            "Entertainment: Musicals & Theatres": 13,
+            "Entertainment: Television": 14,
+            "Entertainment: Video Games": 15,
+            "Entertainment: Board Games": 16,
+            "Science & Nature": 17,
+            "Science: Computers": 18,
+            "Science: Mathematics": 19,
+            "Mythology": 20,
+            "Sports": 21,
+            "Geography": 22,
+            "History": 23,
+            "Politics": 24,
+            "Art": 25,
+            "Celebrities": 26,
+            "Animals": 27,
+            "Vehicles": 28,
+            "Entertainment: Comics": 29,
+            "Science: Gadgets": 30,
+            "Entertainment: Japanese Anime & Manga": 31,
+            "Entertainment: Cartoon & Animations": 32
+        }
 
-    async def fetch_question(self):
+    async def fetch_question(self, category=None):
+        url = self.base_url
+        if category:
+            url += f"&category={category}"
         async with aiohttp.ClientSession() as session:
-            async with session.get(self.api_url) as response:
+            async with session.get(url) as response:
                 if response.status == 200:
                     data = await response.json()
                     return data['results'][0]
@@ -65,7 +94,28 @@ class TriviaCog(commands.Cog):
             await ctx.send("A game is already in progress in this channel.")
             return
 
+        # List categories
+        category_list = ["All"] + list(self.categories.keys())
+        category_embed = discord.Embed(title="Trivia Game Categories", color=discord.Color.blue())
+        category_text = "\n".join([f"{i+1}. {category}" for i, category in enumerate(category_list)])
+        category_embed.add_field(name="Available Categories", value=category_text, inline=False)
+        category_embed.add_field(name="How to Choose", value="Type the number of your desired category", inline=False)
+        await ctx.send(embed=category_embed)
+
+        def category_check(m):
+            return m.author == ctx.author and m.channel == ctx.channel and m.content.isdigit() and 1 <= int(m.content) <= len(category_list)
+
+        try:
+            category_msg = await self.bot.wait_for('message', check=category_check, timeout=30.0)
+            selected_category = category_list[int(category_msg.content) - 1]
+        except asyncio.TimeoutError:
+            await ctx.send("Category selection timed out. Using 'All' categories.")
+            selected_category = "All"
+
+        category_id = None if selected_category == "All" else self.categories[selected_category]
+
         instructions = discord.Embed(title="New Trivia Game!", color=discord.Color.blue())
+        instructions.add_field(name="Category", value=selected_category, inline=False)
         instructions.add_field(name="How to Play", value=(
             "1. Type '1' to join the game.\n"
             "2. The game can be played solo or with multiple players.\n"
@@ -105,10 +155,10 @@ class TriviaCog(commands.Cog):
 
         await ctx.send(f"Game starting with {len(players)} player(s)! Get ready for the first question!")
         self.active_games[ctx.channel.id] = True
-        scores = {player: 0 for player in players}  # Initialize scores for all players
+        scores = {player: 0 for player in players}
 
         for round in range(1, 11):
-            question_data = await self.fetch_question()
+            question_data = await self.fetch_question(category_id)
             if not question_data:
                 await ctx.send("Failed to fetch trivia question. Game ended.")
                 break
@@ -177,7 +227,6 @@ class TriviaCog(commands.Cog):
 
             await ctx.send(embed=answer_embed)
             
-            # Show current scores after each round
             score_update = discord.Embed(title="Current Scores", color=discord.Color.gold())
             for player, score in scores.items():
                 score_update.add_field(name=player.name, value=f"{score} point{'s' if score != 1 else ''}", inline=False)
@@ -194,7 +243,6 @@ class TriviaCog(commands.Cog):
 
         await ctx.send(embed=leaderboard)
         
-        # Announce the winner or congratulate the solo player
         winner, top_score = final_scores[0]
         if len(players) > 1:
             await ctx.send(f"🎉 Congratulations to {winner.mention} for winning with {top_score} point{'s' if top_score != 1 else ''}! 🎉")

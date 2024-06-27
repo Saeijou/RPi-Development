@@ -14,7 +14,7 @@ TOKEN = config['Discord']['TOKEN']
 intents = discord.Intents.default()
 intents.message_content = True
 
-bot = commands.Bot(command_prefix='!', intents=intents)
+bot = commands.Bot(command_prefix='.', intents=intents)
 
 COGS_DIR = config['Paths']['cogs_folder']
 

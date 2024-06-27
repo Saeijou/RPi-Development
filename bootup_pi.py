@@ -60,12 +60,13 @@ else:
 
 report = []
 if successful_scripts:
-    report.append("Successfully Ran Scripts:\n")
-    report.extend(successful_scripts)
+    report.append("Successfully Ran Scripts:")
+    report.extend([f"  - {script}" for script in successful_scripts])
+    report.append("")  # Add an empty line
 if failed_scripts:
-    report.append("\nFailed Scripts:\n")
-    report.extend(failed_scripts)
-
+    report.append("Failed Scripts:")
+    report.extend([f"  - {script}" for script in failed_scripts])
+    report.append("")  # Add an empty line
 def refresh_access_token():
     global access_token
     response = requests.post('https://accounts.zoho.com/oauth/v2/token', data={

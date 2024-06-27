@@ -21,8 +21,9 @@ class BotCapabilities(commands.Cog):
             "AI": CommandCategory("AI", "AI-related commands", []),
             "Search": CommandCategory("Search", "Search-related commands", []),
             "Fun": CommandCategory("Fun", "Fun and entertainment commands", []),
+            "Admin": CommandCategory("Admin", "Administrative commands", []),
+            "Logs": CommandCategory("Logs", "Log viewing commands", []),
             "Music": CommandCategory("Music", "Music playback commands", []),
-            "Games": CommandCategory("Games", "Interactive game commands", []),
         }
 
         for command in self.bot.commands:
@@ -32,11 +33,13 @@ class BotCapabilities(commands.Cog):
                 categories["Search"].commands.append(command)
             elif command.cog_name == "JokePoster":
                 categories["Fun"].commands.append(command)
+            elif command.cog_name == "CogManager":
+                categories["Admin"].commands.append(command)
+            elif command.cog_name == "LogViewer":
+                categories["Logs"].commands.append(command)
             elif command.cog_name == "Music":
                 categories["Music"].commands.append(command)
-            elif command.cog_name == "TriviaCog":
-                categories["Games"].commands.append(command)
-            elif command.cog_name not in ["CogManager", "LogViewer"]:
+            else:
                 categories["General"].commands.append(command)
 
         return categories
@@ -50,13 +53,10 @@ class BotCapabilities(commands.Cog):
         !bothelp           - Show all command categories
         !bothelp <command> - Show detailed help for a specific command
         !bothelp music     - Show an explanation of the music functionality
-        !bothelp triviagame - Show an explanation of the trivia game
         """
         if command_name:
             if command_name.lower() == "music":
                 await self._show_music_explanation(ctx)
-            elif command_name.lower() == "triviagame":
-                await self._show_trivia_explanation(ctx)
             else:
                 await self._show_command_help(ctx, command_name)
         else:
@@ -75,7 +75,6 @@ class BotCapabilities(commands.Cog):
                 embed.add_field(name=category.name, value=f"{category.description}\nCommands: {command_list}", inline=False)
 
         embed.add_field(name="Music Functionality", value="Use `!bothelp music` for an explanation of how the music bot works.", inline=False)
-        embed.add_field(name="Game Functionality", value="Use `!bothelp triviagame` for an explanation of how the trivia game works.", inline=False)
         embed.set_footer(text="Note: Some commands are restricted to authorized users or the bot owner only.")
         await ctx.send(embed=embed)
 
@@ -121,27 +120,10 @@ class BotCapabilities(commands.Cog):
 
         await ctx.send(embed=embed)
 
-    async def _show_trivia_explanation(self, ctx: commands.Context):
-        embed = discord.Embed(
-            title="Trivia Game Functionality",
-            description="Here's how the trivia game works:",
-            color=discord.Color.gold()
-        )
-
-        embed.add_field(name="Starting a Game", value="Use `!triviagame` to start a new trivia game.", inline=False)
-        embed.add_field(name="Joining the Game", value="Players can join by typing '1' when prompted.", inline=False)
-        embed.add_field(name="Game Flow", value="The game consists of 10 questions. Each question is displayed, and players have 30 seconds to answer.", inline=False)
-        embed.add_field(name="Answering Questions", value="For multiple-choice questions, type the letter (A, B, C, or D) of your answer. For True/False questions, type 'True' or 'False'.", inline=False)
-        embed.add_field(name="Scoring", value="Players earn 1 point for each correct answer.", inline=False)
-        embed.add_field(name="Game End", value="After 10 questions, the final scores are displayed, and a winner is announced.", inline=False)
-        embed.add_field(name="Solo Play", value="The game can be played solo or with multiple players.", inline=False)
-
-        await ctx.send(embed=embed)
-
     @commands.Cog.listener()
     async def on_command_error(self, ctx: commands.Context, error: commands.CommandError):
         if isinstance(error, commands.CommandNotFound):
-            await ctx.send(f"Command not found. Use `!bothelp` to see available commands.")
+            pass
         elif isinstance(error, commands.MissingRequiredArgument):
             await ctx.send(f"Missing required argument. Use `!bothelp {ctx.command.name}` for proper usage.")
 

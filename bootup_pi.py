@@ -60,10 +60,10 @@ else:
 
 report = []
 if successful_scripts:
-    report.append("Successfully Ran Scripts:")
+    report.append("Successfully Ran Scripts:\n")
     report.extend(successful_scripts)
 if failed_scripts:
-    report.append("\nFailed Scripts:")
+    report.append("\nFailed Scripts:\n")
     report.extend(failed_scripts)
 
 def refresh_access_token():
@@ -77,10 +77,17 @@ def refresh_access_token():
     if response.status_code == 200:
         access_token = response.json().get('access_token')
         logging.info("Access token refreshed successfully.")
+        # Update the config file with the new access token
+        config['Zoho']['access_token'] = access_token
+        with open(os.path.expanduser('~/Python/.config'), 'w') as configfile:
+            config.write(configfile)
+        return True
     else:
         logging.error(f"Failed to refresh access token: {response.content}")
+        return False
 
 def get_account_id():
+    global access_token
     headers = {
         'Authorization': f'Zoho-oauthtoken {access_token}'
     }
@@ -92,11 +99,17 @@ def get_account_id():
         else:
             logging.error('No accounts found')
             return None
+    elif response.status_code in [401, 404]:  # Unauthorized or Not Found
+        if refresh_access_token():
+            return get_account_id()  # Retry after refreshing
+        else:
+            return None
     else:
         logging.error(f"Failed to get accounts: {response.content}")
         return None
 
 def send_email(report):
+    global access_token
     account_id = get_account_id()
     if not account_id:
         return
@@ -115,11 +128,10 @@ def send_email(report):
 
     response = requests.post(f'https://mail.zoho.com/api/accounts/{account_id}/messages', headers=headers, json=email_data)
 
-    if response.status_code == 401:  # Unauthorized, possibly due to expired access token
-        logging.info("Access token expired, refreshing...")
-        refresh_access_token()
-        headers['Authorization'] = f'Zoho-oauthtoken {access_token}'
-        response = requests.post(f'https://mail.zoho.com/api/accounts/{account_id}/messages', headers=headers, json=email_data)
+    if response.status_code in [401, 404]:  # Unauthorized or Not Found
+        if refresh_access_token():
+            headers['Authorization'] = f'Zoho-oauthtoken {access_token}'
+            response = requests.post(f'https://mail.zoho.com/api/accounts/{account_id}/messages', headers=headers, json=email_data)
 
     if response.status_code == 200:
         logging.info("Email report sent successfully.")

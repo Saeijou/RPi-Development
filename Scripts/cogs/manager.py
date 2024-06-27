@@ -128,7 +128,6 @@ class CogManager(commands.Cog):
         elif isinstance(error, commands.NotOwner):
             await ctx.send("You must be the bot owner to use this command.")
         else:
-            await ctx.send(f"An error occurred: {str(error)}")
             logger.error(f"Error in command {ctx.command}: {str(error)}")
 
 async def setup(bot: commands.Bot):

@@ -36,7 +36,6 @@ else:
     for filename in os.listdir(script_dir):
         if filename.endswith(".py"):
             script_path = os.path.join(script_dir, filename)
-            logging.info(f"Running script: {script_path}")
 
             try:
                 process = subprocess.Popen(["python3", script_path], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -61,11 +60,15 @@ else:
 report = []
 if successful_scripts:
     report.append("Successfully Ran Scripts:")
-    report.extend([f"  - {script}" for script in successful_scripts])
+    for script in successful_scripts:
+        report.append(f"  - {script}")
+        logging.info(f"Successfully ran script: {script}")
     report.append("")  # Add an empty line
+
 if failed_scripts:
     report.append("Failed Scripts:")
-    report.extend([f"  - {script}" for script in failed_scripts])
+    for script in failed_scripts:
+        report.append(f"  - {script}")
     report.append("")  # Add an empty line
 def refresh_access_token():
     global access_token
@@ -120,11 +123,14 @@ def send_email(report):
         'Content-Type': 'application/json'
     }
 
+    # Join the report lines with proper line breaks
+    email_content = '\n'.join(report)
+
     email_data = {
         'fromAddress': sender_email,
         'toAddress': receiver_email,
         'subject': 'Script Execution Report',
-        'content': '\n'.join(report)
+        'content': email_content
     }
 
     response = requests.post(f'https://mail.zoho.com/api/accounts/{account_id}/messages', headers=headers, json=email_data)

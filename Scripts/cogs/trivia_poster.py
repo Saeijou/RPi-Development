@@ -12,6 +12,7 @@ class TriviaCog(commands.Cog):
         self.bot = bot
         self.base_url = "https://opentdb.com/api.php?amount=1"
         self.active_games = {}
+        self.game_starters = {}
         self.cooldowns = {}
         self.categories = {
             "General Knowledge": 9,
@@ -94,7 +95,8 @@ class TriviaCog(commands.Cog):
             await ctx.send("A game is already in progress in this channel.")
             return
 
-        # List categories
+        self.game_starters[ctx.channel.id] = ctx.author
+
         category_list = ["All"] + list(self.categories.keys())
         category_embed = discord.Embed(title="Trivia Game Categories", color=discord.Color.blue())
         category_text = "\n".join([f"{i+1}. {category}" for i, category in enumerate(category_list)])
@@ -143,14 +145,15 @@ class TriviaCog(commands.Cog):
                 players.add(msg.author)
                 await ctx.send(f"{msg.author.name} has joined! We have {len(players)} player(s).")
                 if len(players) == 1:
-                    await ctx.send("The game will start in 10 seconds. More players can still join!")
-                    await asyncio.sleep(10)
+                    await ctx.send("The game will start in 30 seconds. More players can still join!")
+                    await asyncio.sleep(30)
                     break
             except asyncio.TimeoutError:
                 break
 
         if not players:
             await ctx.send("No players joined. Game cancelled.")
+            del self.game_starters[ctx.channel.id]
             return
 
         await ctx.send(f"Game starting with {len(players)} player(s)! Get ready for the first question!")
@@ -202,6 +205,10 @@ class TriviaCog(commands.Cog):
                 except asyncio.TimeoutError:
                     break
 
+            if ctx.channel.id not in self.active_games:
+                await ctx.send("The game has been stopped.")
+                return
+
             answer_embed = discord.Embed(title="Round Results", color=discord.Color.green())
             if question_data['type'] == "multiple":
                 answer_embed.add_field(name="Correct Answer", value=f"{correct_letter}. {correct_answer}", inline=False)
@@ -235,6 +242,7 @@ class TriviaCog(commands.Cog):
             await asyncio.sleep(5)
 
         del self.active_games[ctx.channel.id]
+        del self.game_starters[ctx.channel.id]
 
         final_scores = sorted(scores.items(), key=lambda x: x[1], reverse=True)
         leaderboard = discord.Embed(title="Final Scores", color=discord.Color.gold())
@@ -248,6 +256,20 @@ class TriviaCog(commands.Cog):
             await ctx.send(f"🎉 Congratulations to {winner.mention} for winning with {top_score} point{'s' if top_score != 1 else ''}! 🎉")
         else:
             await ctx.send(f"🎉 Congratulations, {winner.mention}! You scored {top_score} point{'s' if top_score != 1 else ''}! 🎉")
+
+    @commands.command(name="stopgame")
+    async def stop_game(self, ctx):
+        if ctx.channel.id not in self.active_games:
+            await ctx.send("There is no active trivia game in this channel.")
+            return
+
+        if ctx.author != self.game_starters.get(ctx.channel.id):
+            await ctx.send("Only the person who started the game can stop it.")
+            return
+
+        del self.active_games[ctx.channel.id]
+        del self.game_starters[ctx.channel.id]
+        await ctx.send("The trivia game has been stopped.")
 
 async def setup(bot):
     await bot.add_cog(TriviaCog(bot))

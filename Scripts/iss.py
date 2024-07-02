@@ -107,7 +107,6 @@ def get_iss_position(max_retries=3, retry_delay=5):
             return float(data["iss_position"]["latitude"]), float(data["iss_position"]["longitude"])
         except (RequestException, ProtocolError) as e:
             if attempt < max_retries - 1:
-                logging.warning(f"Error fetching ISS position. Retrying in {retry_delay} seconds...")
                 time.sleep(retry_delay)
             else:
                 logging.error(f"Failed to fetch ISS position after {max_retries} attempts. Error: {e}")

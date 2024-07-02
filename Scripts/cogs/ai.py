@@ -30,7 +30,6 @@ class ClaudeAI(commands.Cog):
         self.output_cost_per_1m_tokens = float(self.config['AI']['output_cost_per_1m_tokens'])
         self.user_stats: Dict[str, Dict[str, Any]] = defaultdict(lambda: {"total_input_tokens": 0, "total_output_tokens": 0, "total_cost": 0.0, "last_use": 0})
         self.rate_limit = float(self.config['AI']['rate_limit'])  # in seconds
-        logger.info("ClaudeAI module loaded")
 
     @commands.command(name="ai")
     async def ai_response(self, ctx: commands.Context, *, phrase: str):
@@ -113,4 +112,3 @@ class ClaudeAI(commands.Cog):
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(ClaudeAI(bot))
-    logger.info("ClaudeAI cog added to the bot")

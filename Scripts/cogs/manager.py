@@ -132,4 +132,3 @@ class CogManager(commands.Cog):
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(CogManager(bot))
-    logger.info("CogManager cog loaded")

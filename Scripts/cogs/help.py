@@ -23,6 +23,8 @@ class BotCapabilities(commands.Cog):
             "Search": CommandCategory("Search", "Search-related commands", []),
             "Fun": CommandCategory("Fun", "Fun and entertainment commands", []),
             "Music": CommandCategory("Music", "Music playback commands", []),
+            "Reminders": CommandCategory("Reminders", "Reminder-related commands", []),
+            "Dice Rolling": CommandCategory("Dice Rolling", "Dice rolling and coin flipping commands", []),
         }
 
         for command in self.bot.commands:
@@ -35,6 +37,10 @@ class BotCapabilities(commands.Cog):
                     categories["Fun"].commands.append(command)
                 elif command.cog_name == "Music":
                     categories["Music"].commands.append(command)
+                elif command.cog_name == "Reminder":
+                    categories["Reminders"].commands.append(command)
+                elif command.cog_name == "DiceRoller":
+                    categories["Dice Rolling"].commands.append(command)
                 else:
                     categories["General"].commands.append(command)
 
@@ -115,7 +121,14 @@ class BotCapabilities(commands.Cog):
             "google": "Does a Google search showing top 3 results.",
             "image": "Does an image search providing top result.",
             "joke": "Tells a random joke.",
-            # Add more commands and their descriptions here
+            # Reminder commands
+            "reminder": "Set a reminder for a specified time in the future.",
+            "remindme": "Alias for 'reminder'. Set a reminder for a specified time in the future.",
+            "showreminders": "Display all your active reminders.",
+            "removereminder": "Remove a specific reminder by its ID.",
+            # Dice rolling commands
+            "roll": "Roll one or more dice with a specified number of sides.",
+            "flip": "Flip one or more coins.",
         }
         return descriptions.get(command_name, "This command performs a specific function. Use it as instructed for best results.")
 

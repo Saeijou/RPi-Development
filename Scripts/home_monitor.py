@@ -7,6 +7,9 @@ import requests
 import configparser
 import os
 import socket
+import re
+from watchdog.observers import Observer
+from watchdog.events import FileSystemEventHandler
 
 # Read config
 config = configparser.ConfigParser()
@@ -23,6 +26,10 @@ client_id = config['Zoho']['client_id']
 client_secret = config['Zoho']['client_secret']
 sender_email = config['Email']['sender_email']
 receiver_email = config['Email']['receiver_email']
+
+# Log file paths
+main_log_file = config['Paths']['log_file']
+bot_log_file = config['Paths']['bot_log_file']
 
 def refresh_access_token():
     global access_token
@@ -119,6 +126,37 @@ def check_internet():
             return True
     return False
 
+class LogFileHandler(FileSystemEventHandler):
+    def __init__(self, log_file):
+        self.log_file = log_file
+        self.last_position = 0
+
+    def on_modified(self, event):
+        if event.src_path == self.log_file:
+            self.check_for_errors()
+
+    def check_for_errors(self):
+        with open(self.log_file, 'r') as file:
+            file.seek(self.last_position)
+            new_lines = file.readlines()
+            self.last_position = file.tell()
+
+        for line in new_lines:
+            if re.search(r'ERROR', line, re.IGNORECASE):
+                log_name = 'Main' if self.log_file == main_log_file else 'Bot'
+                send_email(f"{log_name} Log Error Alert", f"An error was detected in the {log_name} log file:\n\n{line}")
+
+def setup_log_monitoring():
+    main_handler = LogFileHandler(main_log_file)
+    bot_handler = LogFileHandler(bot_log_file)
+
+    observer = Observer()
+    observer.schedule(main_handler, path=os.path.dirname(main_log_file), recursive=False)
+    observer.schedule(bot_handler, path=os.path.dirname(bot_log_file), recursive=False)
+    observer.start()
+
+    return observer
+
 def monitor_power_and_internet():
     power_out = False
     internet_out = False
@@ -193,8 +231,12 @@ def monitor_power_and_internet():
         time.sleep(60)  # Wait for 1 minute before next check
 
 if __name__ == "__main__":
-    logging.info("Starting power and internet monitoring script")
+    logging.info("Starting power, internet, and log monitoring script")
     try:
+        log_observer = setup_log_monitoring()
         monitor_power_and_internet()
     except Exception as e:
         logging.error(f"Unexpected error in monitoring script: {e}")
+    finally:
+        log_observer.stop()
+        log_observer.join()

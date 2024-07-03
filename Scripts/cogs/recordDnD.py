@@ -9,6 +9,8 @@ import wave
 import io
 import logging
 import numpy as np
+import struct
+from scipy import signal
 
 # Use the existing logging configuration from the bot
 logger = logging.getLogger(__name__)
@@ -21,6 +23,9 @@ class DnDRecorder(commands.Cog):
         self.current_transcript_filename = None
         self.voice_client = None
         self.audio_buffer = None
+        self.start_time = None
+        self.chunk_size = 50 * 1024 * 1024  # 50MB
+        self.chunk_count = 0
 
         # Read config
         config = configparser.ConfigParser()
@@ -64,6 +69,8 @@ class DnDRecorder(commands.Cog):
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         self.current_audio_filename = os.path.join(self.output_dir, f"recorded_audio_{timestamp}.wav")
         self.audio_buffer = io.BytesIO()
+        self.start_time = datetime.now()
+        self.chunk_count = 0
 
         await ctx.send(f"Recording started. Use '.stoprecord' to stop.")
 
@@ -74,7 +81,6 @@ class DnDRecorder(commands.Cog):
         if not self.is_recording:
             return
 
-        # Check if data has 'pcm' attribute, otherwise try to use the object directly
         audio_data = data.pcm if hasattr(data, 'pcm') else data
 
         if isinstance(audio_data, bytes):
@@ -85,18 +91,44 @@ class DnDRecorder(commands.Cog):
             logger.error(f"Unexpected audio data type: {type(audio_data)}")
             return
 
-        logger.debug(f"Audio data received from {user}: {len(pcm_data)} bytes")
+        # Convert to numpy array
+        pcm_data = np.frombuffer(pcm_data, dtype=np.int16)
 
-        # Calculate audio level (this is a simple RMS calculation)
-        try:
-            audio_samples = np.frombuffer(pcm_data, dtype=np.int16)
-            audio_level = np.sqrt(np.mean(np.square(audio_samples)))
-            logger.debug(f"Audio level: {audio_level}")
-        except Exception as e:
-            logger.error(f"Error calculating audio level: {str(e)}")
+        # Noise reduction
+        pcm_data = pcm_data.astype(np.float32)
+        pcm_data /= 32768.0  # Normalize to [-1, 1]
 
-        # Save raw audio data
-        self.audio_buffer.write(pcm_data)
+        # Simple high-pass filter to reduce low-frequency noise
+        b, a = signal.butter(10, 300.0/(48000/2), btype='highpass')
+        pcm_data = signal.lfilter(b, a, pcm_data)
+
+        # Soft noise gate
+        noise_gate = 0.01
+        pcm_data[np.abs(pcm_data) < noise_gate] = 0
+
+        # Convert back to int16
+        pcm_data = (pcm_data * 32768).astype(np.int16)
+
+        timestamp = (datetime.now() - self.start_time).total_seconds()
+        self.audio_buffer.write(struct.pack('d', timestamp))
+        self.audio_buffer.write(pcm_data.tobytes())
+
+        if self.audio_buffer.tell() >= self.chunk_size:
+            self.save_chunk()
+
+    def save_chunk(self):
+        chunk_filename = f"{self.current_audio_filename[:-4]}_{self.chunk_count}.wav"
+        with wave.open(chunk_filename, 'wb') as wf:
+            wf.setnchannels(2)
+            wf.setsampwidth(2)
+            wf.setframerate(48000)
+            audio_data = self.audio_buffer.getvalue()
+            # Remove the timestamp data before writing
+            audio_data = audio_data[8:]  # 8 bytes for the double timestamp
+            wf.writeframes(audio_data)
+
+        self.chunk_count += 1
+        self.audio_buffer = io.BytesIO()
 
     @commands.command(aliases=['stoprecord'])
     async def stopRecording(self, ctx):
@@ -111,25 +143,14 @@ class DnDRecorder(commands.Cog):
             await self.voice_client.disconnect()
             self.voice_client = None
 
-        # Check if any audio data was recorded
-        if self.audio_buffer.getbuffer().nbytes == 0:
-            await ctx.send("No audio data was recorded. The file is empty.")
-            logger.error("No audio data recorded")
-            return
-
-        # Save the recorded audio
-        with wave.open(self.current_audio_filename, 'wb') as wf:
-            wf.setnchannels(2)  # Stereo
-            wf.setsampwidth(2)  # 16-bit
-            wf.setframerate(48000)  # 48kHz
-            wf.writeframes(self.audio_buffer.getvalue())
+        self.save_chunk()  # Save any remaining data
+        self.combine_chunks()
 
         await ctx.send(f"Recording saved to {self.current_audio_filename}")
-        logger.debug(f"Recording saved to {self.current_audio_filename}")
 
         # Check if the file was created and has content
         if os.path.exists(self.current_audio_filename) and os.path.getsize(self.current_audio_filename) > 0:
-            await ctx.send(f"Recording stopped. Transcribing {self.current_audio_filename}...")
+            await ctx.send(f"Transcribing {self.current_audio_filename}...")
             try:
                 await self.transcribe_audio(ctx)
             except Exception as e:
@@ -139,24 +160,72 @@ class DnDRecorder(commands.Cog):
             await ctx.send(f"Error: Audio file {self.current_audio_filename} was not created or is empty.")
             logger.error(f"Error: Audio file {self.current_audio_filename} was not created or is empty.")
 
+    def combine_chunks(self):
+        with wave.open(self.current_audio_filename, 'wb') as wf:
+            wf.setnchannels(2)
+            wf.setsampwidth(2)
+            wf.setframerate(48000)
+
+            for i in range(self.chunk_count):
+                chunk_filename = f"{self.current_audio_filename[:-4]}_{i}.wav"
+                if not self.check_wav_file(chunk_filename):
+                    logger.error(f"Chunk file {chunk_filename} is not a valid WAV file")
+                    continue
+                with wave.open(chunk_filename, 'rb') as chunk_wf:
+                    wf.writeframes(chunk_wf.readframes(chunk_wf.getnframes()))
+                os.remove(chunk_filename)
+
+        logger.debug(f"Recording saved to {self.current_audio_filename}")
+        if not self.check_wav_file(self.current_audio_filename):
+            logger.error(f"Combined file {self.current_audio_filename} is not a valid WAV file")
+
     async def transcribe_audio(self, ctx):
+        if not os.path.exists(self.current_audio_filename) or os.path.getsize(self.current_audio_filename) == 0:
+            await ctx.send(f"Error: Audio file {self.current_audio_filename} does not exist or is empty.")
+            return
+
+        if not self.check_wav_file(self.current_audio_filename):
+            await ctx.send(f"Error: {self.current_audio_filename} is not a valid WAV file.")
+            return
+
         recognizer = sr.Recognizer()
-        with sr.AudioFile(self.current_audio_filename) as source:
-            audio = recognizer.record(source)
+        full_transcript = ""
 
         try:
-            transcript = recognizer.recognize_google(audio)
+            with sr.AudioFile(self.current_audio_filename) as source:
+                audio = recognizer.record(source)
+
+            try:
+                full_transcript = recognizer.recognize_google(audio)
+            except sr.UnknownValueError:
+                logger.warning("Google Speech Recognition could not understand the audio")
+            except sr.RequestError as e:
+                logger.error(f"Could not request results from Google Speech Recognition service; {e}")
+
             self.current_transcript_filename = self.current_audio_filename.replace(".wav", ".txt")
             with open(self.current_transcript_filename, 'w') as f:
-                f.write(transcript)
+                f.write(full_transcript)
+
             await ctx.send(f"Transcription complete. Saved to '{self.current_transcript_filename}'.")
             logger.debug(f"Transcription complete. Saved to '{self.current_transcript_filename}'.")
-        except sr.UnknownValueError:
-            await ctx.send("Google Speech Recognition could not understand the audio")
-            logger.error("Google Speech Recognition could not understand the audio")
-        except sr.RequestError as e:
-            await ctx.send(f"Could not request results from Google Speech Recognition service; {e}")
-            logger.error(f"Could not request results from Google Speech Recognition service; {e}")
+        except Exception as e:
+            await ctx.send(f"Error during transcription: {str(e)}")
+            logger.error(f"Error during transcription: {str(e)}")
+
+    def check_wav_file(self, filename):
+        try:
+            with wave.open(filename, 'rb') as wf:
+                logger.debug(f"WAV file details for {filename}:")
+                logger.debug(f"Number of channels: {wf.getnchannels()}")
+                logger.debug(f"Sample width: {wf.getsampwidth()}")
+                logger.debug(f"Frame rate: {wf.getframerate()}")
+                logger.debug(f"Number of frames: {wf.getnframes()}")
+                logger.debug(f"Compression type: {wf.getcomptype()}")
+                logger.debug(f"Compression name: {wf.getcompname()}")
+            return True
+        except wave.Error as e:
+            logger.error(f"Error reading WAV file {filename}: {str(e)}")
+            return False
 
     async def send_long_message(self, ctx, message):
         chunks = textwrap.wrap(message, 1900)

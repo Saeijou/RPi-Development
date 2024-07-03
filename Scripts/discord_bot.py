@@ -20,6 +20,15 @@ logging.basicConfig(filename=config['Paths']['bot_log_file'], level=logging.INFO
                     format='%(asctime)s:%(levelname)s:%(message)s')
 
 @bot.event
+async def on_command_error(ctx, error):
+    if isinstance(error, commands.CommandNotFound):
+        logging.info(f"Command not found: {ctx.message.content}")
+        # Optionally, you can send a message to the user
+        # await ctx.send("Sorry, I don't recognize that command.")
+    else:
+        raise error  # Re-raise the error if it's not a CommandNotFound error
+    
+@bot.event
 async def on_ready():
     logging.info(f'We have logged in as {bot.user}')
     bot.loop.create_task(check_for_new_cogs())

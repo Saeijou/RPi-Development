@@ -8,9 +8,11 @@ import configparser
 import os
 import socket
 import re
+import threading
+import hashlib
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
-import threading
+from functools import wraps
 
 # Read config
 config = configparser.ConfigParser()
@@ -76,35 +78,72 @@ def get_account_id():
         logging.error(f"Failed to get accounts: {response.content}")
         return None
 
+def rate_limit(max_per_hour):
+    min_interval = 3600.0 / max_per_hour
+    last_called = [0.0]
+    
+    def decorate(func):
+        @wraps(func)
+        def rate_limited_function(*args, **kwargs):
+            elapsed = time.time() - last_called[0]
+            left_to_wait = min_interval - elapsed
+            if left_to_wait > 0:
+                time.sleep(left_to_wait)
+            ret = func(*args, **kwargs)
+            last_called[0] = time.time()
+            return ret
+        return rate_limited_function
+    return decorate
+
+@rate_limit(max_per_hour=10)  # Adjust this number based on Zoho's limits
 def send_email(subject, content):
     global access_token
-    account_id = get_account_id()
-    if not account_id:
-        return
+    max_retries = 5
+    base_delay = 60  # 1 minute
 
-    headers = {
-        'Authorization': f'Zoho-oauthtoken {access_token}',
-        'Content-Type': 'application/json'
-    }
+    for attempt in range(max_retries):
+        account_id = get_account_id()
+        if not account_id:
+            logging.error("Failed to get account ID")
+            return
 
-    email_data = {
-        'fromAddress': sender_email,
-        'toAddress': receiver_email,
-        'subject': subject,
-        'content': content
-    }
+        headers = {
+            'Authorization': f'Zoho-oauthtoken {access_token}',
+            'Content-Type': 'application/json'
+        }
 
-    response = requests.post(f'https://mail.zoho.com/api/accounts/{account_id}/messages', headers=headers, json=email_data)
+        email_data = {
+            'fromAddress': sender_email,
+            'toAddress': receiver_email,
+            'subject': subject,
+            'content': content
+        }
 
-    if response.status_code in [401, 404]:  # Unauthorized or Not Found
-        if refresh_access_token():
-            headers['Authorization'] = f'Zoho-oauthtoken {access_token}'
+        try:
             response = requests.post(f'https://mail.zoho.com/api/accounts/{account_id}/messages', headers=headers, json=email_data)
 
-    if response.status_code == 200:
-        logging.info(f"Email sent successfully: {subject}")
-    else:
-        logging.error(f"Failed to send email: {response.content}")
+            if response.status_code == 200:
+                logging.info(f"Email sent successfully: {subject}")
+                return
+            elif response.status_code in [401, 404]:  # Unauthorized or Not Found
+                if refresh_access_token():
+                    continue  # Retry with new token
+                else:
+                    logging.error("Failed to refresh access token")
+                    return
+            else:
+                logging.error(f"Failed to send email (Attempt {attempt + 1}/{max_retries}): {response.content}")
+                
+                if "Unusual sending activity detected" in response.text:
+                    delay = base_delay * (2 ** attempt)  # Exponential backoff
+                    logging.info(f"Unusual activity detected. Waiting for {delay} seconds before retrying.")
+                    time.sleep(delay)
+                else:
+                    break  # Exit loop for other types of errors
+        except Exception as e:
+            logging.error(f"Exception occurred while sending email (Attempt {attempt + 1}/{max_retries}): {str(e)}")
+    
+    logging.error(f"Failed to send email after {max_retries} attempts: {subject}")
 
 def get_ups_data():
     try:
@@ -136,6 +175,7 @@ class LogFileHandler(FileSystemEventHandler):
     def __init__(self, log_file):
         self.log_file = log_file
         self.last_position = 0
+        self.reported_errors = set()  # Set to store hashes of reported errors
 
     def on_modified(self, event):
         if event.src_path == self.log_file:
@@ -153,8 +193,24 @@ class LogFileHandler(FileSystemEventHandler):
 
         for line in new_lines:
             if re.search(r'ERROR', line, re.IGNORECASE):
-                log_name = 'Main' if self.log_file == main_log_file else 'Bot'
-                send_email(f"{log_name} Log Error Alert", f"An error was detected in the {log_name} log file:\n\n{line}")
+                # Create a hash of the error message to use as a unique identifier
+                error_hash = hashlib.md5(line.encode()).hexdigest()
+                
+                # Check if this error has already been reported
+                if error_hash not in self.reported_errors:
+                    log_name = 'Main' if self.log_file == main_log_file else 'Bot'
+                    try:
+                        send_email(f"{log_name} Log Error Alert", f"An error was detected in the {log_name} log file:\n\n{line}")
+                        # Add the error hash to the set of reported errors
+                        self.reported_errors.add(error_hash)
+                    except Exception as e:
+                        logging.error(f"Failed to send error alert email: {str(e)}")
+                else:
+                    logging.info(f"Duplicate error detected, not sending email: {line.strip()}")
+
+    def clear_reported_errors(self):
+        """Clear the set of reported errors. Call this method periodically to allow re-reporting of errors."""
+        self.reported_errors.clear()
 
 def setup_log_monitoring():
     main_handler = LogFileHandler(main_log_file)
@@ -168,10 +224,21 @@ def setup_log_monitoring():
     return observer, main_handler, bot_handler
 
 def continuous_error_check(main_handler, bot_handler):
+    clear_interval = 3600  # Clear reported errors every hour
+    last_clear_time = time.time()
+
     while True:
         if internet_status:
             main_handler.check_for_errors()
             bot_handler.check_for_errors()
+
+        # Clear reported errors every hour
+        current_time = time.time()
+        if current_time - last_clear_time >= clear_interval:
+            main_handler.clear_reported_errors()
+            bot_handler.clear_reported_errors()
+            last_clear_time = current_time
+
         time.sleep(60)  # Check for errors every minute
 
 def monitor_power_and_internet():

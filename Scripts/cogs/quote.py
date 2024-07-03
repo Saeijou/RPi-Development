@@ -3,11 +3,22 @@ from discord.ext import commands
 import json
 import random
 import os
+import configparser
 
 class QuoteCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        self.quotes_file = "quotes.json"
+        
+        # Read config
+        config = configparser.ConfigParser()
+        config.read(os.path.expanduser('~/Python/.config'))
+
+        # Get the cogs directory from config
+        cogs_dir = config['Paths']['cogs_folder']
+        
+        # Set the quotes file path in the json subfolder
+        self.quotes_file = os.path.join(cogs_dir, "json", "quotes.json")
+        
         self.quotes = self.load_quotes()
 
     def load_quotes(self):
@@ -17,6 +28,8 @@ class QuoteCog(commands.Cog):
         return {}
 
     def save_quotes(self):
+        # Ensure the json subfolder exists
+        os.makedirs(os.path.dirname(self.quotes_file), exist_ok=True)
         with open(self.quotes_file, "w") as f:
             json.dump(self.quotes, f, indent=2)
 

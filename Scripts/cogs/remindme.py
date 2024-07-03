@@ -6,6 +6,8 @@ import asyncio
 import logging
 from datetime import datetime, timedelta
 from typing import Optional
+import os
+import configparser
 
 # Set up logging
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s:%(levelname)s:%(message)s')
@@ -14,7 +16,17 @@ class Reminder(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.reminders = {}
-        self.reminder_file = "reminders.json"
+        
+        # Read config
+        config = configparser.ConfigParser()
+        config.read(os.path.expanduser('~/Python/.config'))
+
+        # Get the cogs directory from config
+        cogs_dir = config['Paths']['cogs_folder']
+        
+        # Set the reminder file path in the json subfolder
+        self.reminder_file = os.path.join(cogs_dir, "json", "reminders.json")
+        
         self.load_reminders()
         self.check_reminders.start()
 
@@ -154,18 +166,20 @@ class Reminder(commands.Cog):
         await self.bot.wait_until_ready()
 
     def save_reminders(self):
+        # Ensure the json subfolder exists
+        os.makedirs(os.path.dirname(self.reminder_file), exist_ok=True)
         with open(self.reminder_file, 'w') as f:
             json.dump(self.reminders, f, indent=4)
-        logging.info(f"Saved {len(self.reminders)} reminders to file")
+        logging.info(f"Saved {len(self.reminders)} reminders to file: {self.reminder_file}")
 
     def load_reminders(self):
         try:
             with open(self.reminder_file, 'r') as f:
                 self.reminders = json.load(f)
-            logging.info(f"Loaded {len(self.reminders)} reminders from file")
+            logging.info(f"Loaded {len(self.reminders)} reminders from file: {self.reminder_file}")
         except FileNotFoundError:
             self.reminders = {}
-            logging.info("No reminders file found, starting with empty reminders")
+            logging.info(f"No reminders file found at {self.reminder_file}, starting with empty reminders")
 
     @commands.command()
     async def removereminder(self, ctx, reminder_id: str):

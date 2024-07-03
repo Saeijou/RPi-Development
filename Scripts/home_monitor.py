@@ -10,6 +10,7 @@ import socket
 import re
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
+import threading
 
 # Read config
 config = configparser.ConfigParser()
@@ -155,7 +156,13 @@ def setup_log_monitoring():
     observer.schedule(bot_handler, path=os.path.dirname(bot_log_file), recursive=False)
     observer.start()
 
-    return observer
+    return observer, main_handler, bot_handler
+
+def continuous_error_check(main_handler, bot_handler):
+    while True:
+        main_handler.check_for_errors()
+        bot_handler.check_for_errors()
+        time.sleep(60)  # Check for errors every minute
 
 def monitor_power_and_internet():
     power_out = False
@@ -233,7 +240,13 @@ def monitor_power_and_internet():
 if __name__ == "__main__":
     logging.info("Starting power, internet, and log monitoring script")
     try:
-        log_observer = setup_log_monitoring()
+        log_observer, main_handler, bot_handler = setup_log_monitoring()
+        
+        # Start the continuous error checking in a separate thread
+        error_check_thread = threading.Thread(target=continuous_error_check, args=(main_handler, bot_handler))
+        error_check_thread.daemon = True
+        error_check_thread.start()
+
         monitor_power_and_internet()
     except Exception as e:
         logging.error(f"Unexpected error in monitoring script: {e}")

@@ -113,6 +113,7 @@ class BotCapabilities(commands.Cog):
             "stop": "This stops the music playback and clears the queue.",
             "play": "Plays a song or adds it to the queue if something is already playing.",
             "skip": "Skips the current song and plays the next one in the queue.",
+            "next": "Skips the current song and plays the next one in the queue.",
             "queue": "Shows the current music queue.",
             "leave": "Makes the bot leave the voice channel and clears the queue.",
             "triviagame": "Starts a trivia game.",
@@ -142,7 +143,7 @@ class BotCapabilities(commands.Cog):
         embed.add_field(name="Requesting Songs", value="Use `.play <song name or URL>` to request a song. The bot will search YouTube and add the song to the queue.", inline=False)
         embed.add_field(name="Queue System", value="Songs are added to a queue. If no song is playing, the bot will immediately play the requested song. Otherwise, it will be added to the queue.", inline=False)
         embed.add_field(name="Viewing the Queue", value="Use `.queue` to see the list of upcoming songs.", inline=False)
-        embed.add_field(name="Skipping Songs", value="Use `.skip` to skip the current song and play the next one in the queue.", inline=False)
+        embed.add_field(name="Skipping Songs", value="Use `.skip` or `.next`to skip the current song and play the next one in the queue.", inline=False)
         embed.add_field(name="Stopping Playback", value="Use `.stop` to stop the current playback and clear the queue.", inline=False)
         embed.add_field(name="Disconnecting", value="Use `.leave` to make the bot leave the voice channel and clear the queue.", inline=False)
         embed.add_field(name="Note", value="The bot can only play in one voice channel per server at a time. It will automatically move to your channel if you use a command while in a different voice channel.", inline=False)

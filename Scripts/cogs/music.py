@@ -7,6 +7,7 @@ import os
 import random
 from googleapiclient.discovery import build
 import time
+import logging
 
 # Read config
 config = configparser.ConfigParser()
@@ -33,6 +34,13 @@ ydl_opts = {
     'username': EMAIL,
     'password': PASSWORD,
 }
+
+intents = discord.Intents.default()
+intents.message_content = True
+bot = commands.Bot(command_prefix='.', intents=intents)
+
+# Add this line
+discord.utils.setup_logging(level=logging.INFO, root=False)
 
 async def retry_with_backoff(func, max_retries=3, base_delay=1):
     for attempt in range(max_retries):
@@ -137,18 +145,33 @@ class Music(commands.Cog):
             await ctx.send(f"An error occurred while connecting to the voice channel: {str(e)}")
             return
 
-        await ctx.send("Searching for the song... This may take a moment.")
+        # Check if the query is a YouTube or YouTube Music link
+        if query.startswith(('https://www.youtube.com/', 'https://youtu.be/', 'https://music.youtube.com/')):
+            processing_msg = await ctx.send("Processing YouTube link... This may take a while for large playlists.")
+            song_infos = await self.extract_info(query)
+            await processing_msg.delete()
+        else:
+            await ctx.send("Searching for the song... This may take a moment.")
+            song_infos = [await search_youtube(query)]
 
-        song_info = await search_youtube(query)
-        if not song_info:
-            await ctx.send(f"Could not find the requested song: {query}")
+        if not song_infos:
+            await ctx.send(f"Failed to process the requested song or playlist: {query}")
             return
 
-        if ctx.guild.id not in self.queue:
-            self.queue[ctx.guild.id] = []
+        songs_added = 0
+        for song_info in song_infos:
+            if song_info and 'url' in song_info and 'title' in song_info:
+                if ctx.guild.id not in self.queue:
+                    self.queue[ctx.guild.id] = []
+                self.queue[ctx.guild.id].append(song_info)
+                songs_added += 1
 
-        self.queue[ctx.guild.id].append(song_info)
-        await ctx.send(f"Added to queue: {song_info['title']}")
+        if songs_added == 1:
+            await ctx.send(f"Added to queue: {song_infos[0]['title']}")
+        elif songs_added > 1:
+            await ctx.send(f"Added {songs_added} songs to the queue.")
+        else:
+            await ctx.send("No valid songs were found.")
 
         self.reset_activity_timer(ctx.guild.id)
         self.last_member_time.pop(ctx.guild.id, None)
@@ -172,7 +195,7 @@ class Music(commands.Cog):
             self.current_song[ctx.guild.id] = None
             await ctx.send("Queue is empty. Use .play to add more songs.")
 
-    @commands.command()
+    @commands.command(aliases=['next'])
     async def skip(self, ctx):
         self.reset_activity_timer(ctx.guild.id)
         voice_client = ctx.voice_client
@@ -192,7 +215,18 @@ class Music(commands.Cog):
             current_song = self.current_song.get(ctx.guild.id)
             if current_song:
                 queue_list = f"Now playing: {current_song['title']}\n\nQueue:\n{queue_list}"
-            await ctx.send(f"```{queue_list}```")
+            
+            # Split the queue into multiple messages if it's too long
+            if len(queue_list) > 1900:  # Discord has a 2000 character limit
+                parts = []
+                while len(queue_list) > 1900:
+                    part, queue_list = queue_list[:1900], queue_list[1900:]
+                    parts.append(f"```{part}```")
+                parts.append(f"```{queue_list}```")
+                for part in parts:
+                    await ctx.send(part)
+            else:
+                await ctx.send(f"```{queue_list}```")
 
     @commands.command()
     async def clear(self, ctx):
@@ -228,6 +262,57 @@ class Music(commands.Cog):
         else:
             await ctx.send("The bot is not connected to a voice channel.")
 
+    async def extract_info(self, url):
+        ydl_opts = {
+            'format': 'bestaudio/best',
+            'no_warnings': True,
+            'quiet': True,
+            'extract_flat': 'in_playlist',
+            'extractor_args': {
+                'youtube': {
+                    'skip': ['dash', 'hls'],
+                },
+                'youtubetab': {
+                    'skip': ['dash', 'hls'],
+                },
+            },
+        }
+        
+        async def extract():
+            try:
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    info = await asyncio.to_thread(ydl.extract_info, url, download=False)
+                    if 'entries' in info:
+                        # It's a playlist
+                        entries = []
+                        for entry in info['entries']:
+                            try:
+                                video_info = await asyncio.to_thread(ydl.extract_info, entry['url'], download=False)
+                                entries.append({'url': video_info['url'], 'title': video_info['title']})
+                            except Exception as e:
+                                print(f"Error extracting info for {entry.get('title', 'unknown')}: {e}")
+                        return entries
+                    else:
+                        # It's a single video
+                        return [{'url': info['url'], 'title': info['title']}]
+            except Exception as e:
+                print(f"Error in extract: {e}")
+                return None
+
+        try:
+            songs = await asyncio.wait_for(extract(), timeout=300)  # 5 minute timeout for large playlists
+            if songs:
+                return [song for song in songs if song['url']]  # Filter out any entries without a URL
+            print(f"Failed to extract info for URL: {url}")
+            return None
+        except asyncio.TimeoutError:
+            print(f"Timeout while extracting info for URL: {url}")
+            return None
+        except Exception as e:
+            print(f"An error occurred in extract_info: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return None
+
 async def setup(bot):
     await bot.add_cog(Music(bot))
-    print("Music cog loaded")

@@ -32,6 +32,9 @@ receiver_email = config['Email']['receiver_email']
 main_log_file = config['Paths']['log_file']
 bot_log_file = config['Paths']['bot_log_file']
 
+# Global variable to track internet status
+internet_status = True
+
 def refresh_access_token():
     global access_token
     response = requests.post('https://accounts.zoho.com/oauth/v2/token', data={
@@ -117,14 +120,16 @@ def get_ups_data():
         return None
 
 def check_internet():
+    global internet_status
     hosts = ['google.com', '1.1.1.1']
     for host in hosts:
         try:
             socket.create_connection((host, 80), timeout=5)
+            internet_status = True
+            return True
         except OSError:
             pass
-        else:
-            return True
+    internet_status = False
     return False
 
 class LogFileHandler(FileSystemEventHandler):
@@ -137,6 +142,10 @@ class LogFileHandler(FileSystemEventHandler):
             self.check_for_errors()
 
     def check_for_errors(self):
+        global internet_status
+        if not internet_status:
+            return  # Skip error checking if internet is out
+
         with open(self.log_file, 'r') as file:
             file.seek(self.last_position)
             new_lines = file.readlines()
@@ -160,11 +169,13 @@ def setup_log_monitoring():
 
 def continuous_error_check(main_handler, bot_handler):
     while True:
-        main_handler.check_for_errors()
-        bot_handler.check_for_errors()
+        if internet_status:
+            main_handler.check_for_errors()
+            bot_handler.check_for_errors()
         time.sleep(60)  # Check for errors every minute
 
 def monitor_power_and_internet():
+    global internet_status
     power_out = False
     internet_out = False
     battery_low_alert_sent = False
@@ -238,7 +249,6 @@ def monitor_power_and_internet():
         time.sleep(60)  # Wait for 1 minute before next check
 
 if __name__ == "__main__":
-    logging.info("Starting power, internet, and log monitoring script")
     try:
         log_observer, main_handler, bot_handler = setup_log_monitoring()
         

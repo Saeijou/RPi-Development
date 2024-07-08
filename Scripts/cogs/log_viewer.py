@@ -25,7 +25,7 @@ class LogViewer(commands.Cog):
     async def view_bot_log(self, ctx):
         """View the last 25 lines of bot.log"""
         logs = self.get_last_25_lines(self.bot_log_file)
-        
+       
         if len(logs) > 2000:
             # If the log is too long, send it as a file
             buffer = StringIO(logs)
@@ -39,7 +39,7 @@ class LogViewer(commands.Cog):
     async def view_script_runner_log(self, ctx):
         """View the last 25 lines of script_runner.log"""
         logs = self.get_last_25_lines(self.script_runner_log_file)
-        
+       
         if len(logs) > 2000:
             # If the log is too long, send it as a file
             buffer = StringIO(logs)
@@ -47,6 +47,26 @@ class LogViewer(commands.Cog):
             await ctx.send("Here are the last 25 lines of script runner logs:", file=file)
         else:
             await ctx.send(f"```\n{logs}\n```")
+
+    @commands.command(name="rmbot")
+    @commands.is_owner()
+    async def clear_bot_log(self, ctx):
+        """Clear the bot.log file"""
+        try:
+            open(self.bot_log_file, 'w').close()
+            await ctx.send("Bot log has been cleared.")
+        except Exception as e:
+            await ctx.send(f"An error occurred while clearing the bot log: {str(e)}")
+
+    @commands.command(name="rmscript")
+    @commands.is_owner()
+    async def clear_script_log(self, ctx):
+        """Clear the script_runner.log file"""
+        try:
+            open(self.script_runner_log_file, 'w').close()
+            await ctx.send("Script runner log has been cleared.")
+        except Exception as e:
+            await ctx.send(f"An error occurred while clearing the script runner log: {str(e)}")
 
 async def setup(bot):
     await bot.add_cog(LogViewer(bot))

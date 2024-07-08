@@ -1,4 +1,8 @@
 import logging
+import discord
+from discord.ext import commands
+import os
+import configparser
 
 logger = logging.getLogger(__name__)
 
@@ -66,9 +70,13 @@ class Game:
         self.rat_people_distracted = False
         self.energy_drink_opened = False
         self.is_game_over = False
-        logger.info("Game initialized")
-        logger.debug(f"Initial location: {self.current_location}")
-        logger.debug(f"All locations: {list(self.locations.keys())}")
+        self.config = self.load_config()
+ 
+    def load_config(self):
+        config = configparser.ConfigParser()
+        config_path = os.path.expanduser('~/Python/.config')
+        config.read(config_path)
+        return config
 
     def play(self):
         output = []
@@ -77,7 +85,44 @@ class Game:
         output.append("solve puzzles, and uncover the secrets of the old world.")
         output.append("Type 'help' at any time for a list of commands.")
         output.append(self.look())
-        return "\n".join(output)
+        
+        logger.debug(f"Config object: {self.config}")
+        logger.debug(f"Config sections: {self.config.sections()}")
+
+        # Get the path to the image
+        try:
+            pictures_folder = self.config['Paths']['pictures_folder']
+            logger.debug(f"Pictures folder from config: {pictures_folder}")
+            image_path = os.path.join(pictures_folder, 'ruins_of_new_york.png')
+            logger.debug(f"Full image path: {image_path}")
+            
+            if not os.path.exists(image_path):
+                logger.warning(f"Image file does not exist: {image_path}")
+                image_path = None
+        except KeyError as e:
+            logger.error(f"Error reading config: {e}")
+            logger.debug(f"Config object: {self.config}")
+            logger.debug(f"Config sections: {self.config.sections()}")
+            image_path = None
+        except Exception as e:
+            logger.error(f"Unexpected error: {str(e)}")
+            image_path = None
+        
+        # Return both the intro text and the image path
+        return {
+            "message": "\n".join(output),
+            "image_path": image_path
+        }
+    
+    async def send_image(self, user, image_path):
+        try:
+            with open(image_path, 'rb') as f:
+                picture = discord.File(f)
+                await user.send(file=picture)
+        except Exception as e:
+            logger.error(f"Error sending image: {e}")
+            await user.send("Sorry, I couldn't send the image.")
+
 
     def process_command(self, command):
         logger.info(f"Processing command: {command}")
@@ -169,6 +214,26 @@ class Game:
                 return self.consult_book(command[3])
             else:
                 return "Consult what about what?"
+        elif action == "throw":
+            if len(command) > 1 and command[1] in ["bag", "cheez-ees"]:
+                return self.throw_bag()
+            else:
+                return "Throw what?"
+        elif action == "distract":
+            if self.current_location == "dark_tunnel":
+                return self.throw_bag()
+            else:
+                return "There's nothing here that needs distracting."
+        elif action == "use":
+            if len(command) > 1:
+                return self.use_item(command[1])
+            else:
+                return "Use what?"
+        elif action == "drop":
+            if len(command) > 1:
+                return self.drop_item(command[1])
+            else:
+                return "Drop what?"
         elif action == "help":
             return self.get_help()
         elif action == "quit":
@@ -214,11 +279,22 @@ class Game:
         
         if new_location == "dark_tunnel" and not self.riding_bicycle and not self.rat_people_distracted:
             logger.info("Prevented from entering dark tunnel due to danger")
-            return "The tunnel looks dangerous. You might need a quick way to escape if things go wrong."
+            return self.encounter_rat_people()
         
         self.current_location = new_location
         logger.info(f"Moved to new location: {self.current_location}")
         return self.look()
+
+    def encounter_rat_people(self):
+        output = "After traveling through the tunnel for what seems like forever, several hunched humanoid figures scramble from the darkness—you find yourself surrounded.\n"
+        if "cheez-ees" in self.inventory:
+            output += "The rat people look hungry. Maybe you could distract them with something? (Hint: try 'throw bag' or 'use cheez-ees')"
+        else:
+            output += "The rat people advance, their chittering growing louder. You have no way to distract them!"
+            self.is_game_over = True
+            self.score -= 10
+            output += f"\nGame Over! Final score: {self.score}"
+        return output
 
     def look(self):
         logger.info(f"Look method called. Current location: {self.current_location}")
@@ -254,20 +330,42 @@ class Game:
             return f"There's no {item} here."
 
     def examine(self, item):
-        if item == "bicycle" and ("bicycle" in self.locations[self.current_location]["items"] or "bicycle" in self.inventory):
-            return "The bike has seen better days but it's still usable—barely. The chain is rusted and some of the teeth on its gears are broken."
-        elif item == "book" and "book" in self.inventory:
-            return "The book is entitled: 'How to Build Anything'. On the cover it shows someone pedaling a bike to generate electricity. That might be useful to know!"
-        elif item == "cheez-ees" and "cheez-ees" in self.inventory:
-            return "The text on the unopened bag proclaims these are 'Delicious, crispy, cheese-shaped, cheese-flavored crackers.'"
-        elif item == "vending machine" and self.current_location == "platform":
-            return "Pictures of fizzy drinks are on its side, as well as a cartoon goat. The battered and abused machine appears to be without power."
-        elif item == "computer" and self.current_location == "bunker":
-            return "It's an ancient machine with a disk drive and a large, rounded glass monitor. It's plugged into a power inverter."
-        elif item == "power inverter" and self.current_location == "bunker":
-            return "An electrical device. If you could hook up a battery to it, you could use it battery to power this computer."
-        elif item == "toolbox" and self.current_location == "bunker":
-            return "Yeah, you could build something with this. But what?"
+        loc = self.locations[self.current_location]
+        
+        # Check if the item is in the current location or inventory
+        if item in loc["items"] or item in self.inventory:
+            if item == "bicycle":
+                return "The bike has seen better days but it's still usable—barely. The chain is rusted and some of the teeth on its gears are broken."
+            elif item == "book":
+                return "The book is entitled: 'How to Build Anything'. On the cover it shows someone pedaling a bike to generate electricity. That might be useful to know!"
+            elif item == "cheez-ees":
+                return "The text on the unopened bag proclaims these are 'Delicious, crispy, cheese-shaped, cheese-flavored crackers.'"
+            elif item == "vending machine" and self.current_location == "platform":
+                return "Pictures of fizzy drinks are on its side, as well as a cartoon goat. The battered and abused machine appears to be without power."
+            elif item == "computer" and self.current_location == "bunker":
+                return "It's an ancient machine with a disk drive and a large, rounded glass monitor. It's plugged into a power inverter."
+            elif item == "power inverter" and self.current_location == "bunker":
+                return "An electrical device. If you could hook up a battery to it, you could use it battery to power this computer."
+            elif item == "toolbox" and self.current_location == "bunker":
+                return "Yeah, you could build something with this. But what?"
+            elif item == "wrecked_bike" and self.current_location == "platform":
+                return "The bike is damaged beyond repair. The front wheel is warped from hitting the metal rails."
+            elif item == "shelves" and self.current_location == "store":
+                return "Amidst the trash you find the last remaining bag of CHEEZ-EEs and a book."
+            elif item in ["motor", "car_battery", "drive_belt", "jumper_cables", "wires"] and self.current_location == "scrapyard":
+                return f"A {item} that could be useful for building something."
+            else:
+                return f"You see a {item}. It doesn't seem particularly noteworthy."
+        elif item == "figures" and self.current_location == "dark_tunnel":
+            return "They walk like humans but chitter like rodents; you see their beady red eyes and flashes of sharp white teeth—like some kind of...rat people!"
+        elif item == "tunnel" and self.current_location == "tunnel_entrance":
+            return "It will take you beneath the river to the other side. Traveling on foot could be dangerous—best to find a faster way to get to the other side."
+        elif item == "people" and self.current_location == "market":
+            return "Mutants. They wear armor forged from salvaged street signs and they carry various devices used to stab, slash, smash and crush. They are fearsome to behold but not overtly aggressive...yet."
+        elif item == "leader" and self.current_location == "market":
+            return "Her headdress is fashioned from yellow caution tape, spoons and old soda cans. Around her neck she wears a floppy disk on a string."
+        elif item == "junk pile" and self.current_location == "scrapyard":
+            return "You find some useful car parts in amongst the trash. There's an old motor, a car battery, a drive belt, jumper cables and wires. Alas, the car battery is dead."
         else:
             return f"You don't see any {item} here to examine."
 
@@ -398,6 +496,43 @@ class Game:
         else:
             self.game_over("You've been overwhelmed by the rat people.")
             return output + "The rat people advance, their chittering growing louder..."
+        
+    def throw_bag(self):
+        if "cheez-ees" in self.inventory and self.current_location == "dark_tunnel":
+            self.inventory.remove("cheez-ees")
+            self.rat_people_distracted = True
+            self.score += 15
+            return "The rat people scurry to collect their cheesy prize, turning their backs on you for a brief moment. You've successfully distracted them! Your score increased by 15 points."
+        elif "cheez-ees" in self.inventory:
+            return "You throw the bag of CHEEZ-EEs, but nothing happens. Maybe save it for when you really need it?"
+        else:
+            return "You don't have any CHEEZ-EEs to throw."
+        
+    def use_item(self, item):
+        if item == "bicycle" and "bicycle" in self.inventory:
+            return self.ride_bicycle()
+        elif item == "book" and "book" in self.inventory:
+            return self.read_book()
+        elif item == "cheez-ees" and "cheez-ees" in self.inventory:
+            if self.current_location == "dark_tunnel":
+                return self.throw_bag()
+            else:
+                return "You don't need to use the CHEEZ-EEs right now."
+        elif item == "energy_drink" and "energy_drink" in self.inventory:
+            if self.energy_drink_opened:
+                return self.drink_can()
+            else:
+                return self.open_can()
+        else:
+            return f"You can't use the {item} right now."
+
+    def drop_item(self, item):
+        if item in self.inventory:
+            self.inventory.remove(item)
+            self.locations[self.current_location]["items"].append(item)
+            return f"You drop the {item}."
+        else:
+            return f"You don't have a {item} to drop."
 
     def game_over(self, message):
         self.is_game_over = True
@@ -416,6 +551,10 @@ class Game:
             "open can - Open the energy drink",
             "drink can - Drink the opened energy drink",
             "talk to [person] - Talk to someone",
+            "throw [item] - Throw an item",
+            "distract - Try to distract nearby creatures",
+            "use [item] - Use an item in your inventory",
+            "drop [item] - Drop an item from your inventory",
             "trade - Attempt to trade with the mutant leader",
             "build generator - Attempt to build a generator",
             "attach [item] to [item] - Attach two items together",

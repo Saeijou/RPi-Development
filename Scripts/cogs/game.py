@@ -109,8 +109,29 @@ class Cog(commands.Cog):
         logger.info(f"Entering play_game method for player {player}")
         game, _, guild_id = self.active_games[player.id]
         
-        intro_message = game.play()
+        play_result = game.play()
+        
+        if isinstance(play_result, dict):
+            intro_message = play_result.get("message", "Welcome to the game!")
+            image_path = play_result.get("image_path")
+        else:
+            intro_message = play_result
+            image_path = None
+
         logger.debug(f"Intro message: {intro_message}")
+        logger.debug(f"Image path: {image_path}")
+        
+        # Send the image if path is provided
+        if image_path and os.path.exists(image_path):
+            try:
+                with open(image_path, 'rb') as f:
+                    picture = discord.File(f)
+                    await player.send(file=picture)
+            except Exception as e:
+                logger.error(f"Error sending image: {e}")
+                await player.send("Sorry, I couldn't send the game map image.")
+        
+        # Send the intro message
         await player.send(intro_message)
         await player.send("Game started. You can now enter commands.")
         

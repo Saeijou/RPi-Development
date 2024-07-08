@@ -132,15 +132,15 @@ class DnDRecorder(commands.Cog):
             
             try:
                 logger.debug(f"Attempting to process audio file: {self.current_audio_filename}")
-                success, message = await self.process_audio(self.current_audio_filename, processed_audio_filename)
+                success = await self.process_audio(self.current_audio_filename, processed_audio_filename)
                 
                 if success and os.path.exists(processed_audio_filename) and os.path.getsize(processed_audio_filename) > 0:
                     self.current_audio_filename = processed_audio_filename
-                    await ctx.send(f"Audio processing completed successfully. {message}")
-                    logger.info(f"Audio processing completed successfully. {message}")
+                    await ctx.send("Audio processing completed successfully.")
+                    logger.info("Audio processing completed successfully.")
                 else:
-                    await ctx.send(f"Audio processing failed: {message}. Using original audio.")
-                    logger.warning(f"Audio processing failed: {message}")
+                    await ctx.send("Audio processing failed. Using original audio.")
+                    logger.warning("Audio processing failed or produced empty file.")
             except Exception as e:
                 await ctx.send(f"Error during audio processing: {str(e)}. Using original audio.")
                 logger.error(f"Error during audio processing: {str(e)}", exc_info=True)
@@ -175,47 +175,25 @@ class DnDRecorder(commands.Cog):
         logger.info(f"Starting audio processing for {input_file}")
         try:
             # Load the audio file
-            original_audio = AudioSegment.from_wav(input_file)
-            logger.info(f"Loaded audio file: duration={len(original_audio)}ms, channels={original_audio.channels}, sample_width={original_audio.sample_width}, frame_rate={original_audio.frame_rate}")
-
-            # Check initial volume
-            initial_volume = original_audio.dBFS
-            logger.info(f"Initial volume: {initial_volume} dBFS")
+            audio = AudioSegment.from_wav(input_file)
+            logger.info(f"Loaded audio file: duration={len(audio)}ms, channels={audio.channels}")
 
             # Increase volume by 50%
-            audio = original_audio + 6  # Increasing by 6dB is roughly equivalent to 150% volume
-            logger.info(f"Increased volume by 6dB. New volume: {audio.dBFS} dBFS")
+            audio = audio + 6  # Increasing by 6dB is roughly equivalent to 150% volume
+            logger.info("Increased volume by 50%")
 
             # Normalize audio
-            normalized_audio = normalize(audio)
-            logger.info(f"Normalized audio. Final volume: {normalized_audio.dBFS} dBFS")
+            audio = normalize(audio)
+            logger.info("Normalized audio")
 
             # Export the processed audio
-            normalized_audio.export(output_file, format="wav")
+            audio.export(output_file, format="wav")
             logger.info(f"Exported processed audio to {output_file}")
 
-            # Verify the processed file
-            with wave.open(output_file, 'rb') as wf:
-                channels = wf.getnchannels()
-                sample_width = wf.getsampwidth()
-                frame_rate = wf.getframerate()
-                n_frames = wf.getnframes()
-                
-            logger.info(f"Processed audio file details: channels={channels}, sample_width={sample_width}, frame_rate={frame_rate}, n_frames={n_frames}")
-
-            # Compare with original
-            if (channels != original_audio.channels or 
-                sample_width != original_audio.sample_width or 
-                frame_rate != original_audio.frame_rate or 
-                abs(n_frames - len(original_audio.raw_data) / (channels * sample_width)) > 1):
-                return False, "Processed audio file properties do not match the original"
-
-            volume_change = normalized_audio.dBFS - initial_volume
-            return True, f"Volume changed by {volume_change:.2f} dB"
-
+            return True
         except Exception as e:
             logger.error(f"Error during audio processing: {str(e)}", exc_info=True)
-            return False, str(e)
+            return False
 
     async def transcribe_audio(self, ctx):
         if not os.path.exists(self.current_audio_filename) or os.path.getsize(self.current_audio_filename) == 0:

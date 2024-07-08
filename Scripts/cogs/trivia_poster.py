@@ -269,7 +269,6 @@ class TriviaCog(commands.Cog):
 
         del self.active_games[ctx.channel.id]
         del self.game_starters[ctx.channel.id]
-        await ctx.send("The trivia game has been stopped.")
 
 async def setup(bot):
     await bot.add_cog(TriviaCog(bot))

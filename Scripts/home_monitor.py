@@ -7,12 +7,6 @@ import requests
 import configparser
 import os
 import socket
-import re
-import threading
-import hashlib
-from watchdog.observers import Observer
-from watchdog.events import FileSystemEventHandler
-from functools import wraps
 
 # Read config
 config = configparser.ConfigParser()
@@ -29,13 +23,6 @@ client_id = config['Zoho']['client_id']
 client_secret = config['Zoho']['client_secret']
 sender_email = config['Email']['sender_email']
 receiver_email = config['Email']['receiver_email']
-
-# Log file paths
-main_log_file = config['Paths']['log_file']
-bot_log_file = config['Paths']['bot_log_file']
-
-# Global variable to track internet status
-internet_status = True
 
 def refresh_access_token():
     global access_token
@@ -78,72 +65,35 @@ def get_account_id():
         logging.error(f"Failed to get accounts: {response.content}")
         return None
 
-def rate_limit(max_per_hour):
-    min_interval = 3600.0 / max_per_hour
-    last_called = [0.0]
-    
-    def decorate(func):
-        @wraps(func)
-        def rate_limited_function(*args, **kwargs):
-            elapsed = time.time() - last_called[0]
-            left_to_wait = min_interval - elapsed
-            if left_to_wait > 0:
-                time.sleep(left_to_wait)
-            ret = func(*args, **kwargs)
-            last_called[0] = time.time()
-            return ret
-        return rate_limited_function
-    return decorate
-
-@rate_limit(max_per_hour=10)  # Adjust this number based on Zoho's limits
 def send_email(subject, content):
     global access_token
-    max_retries = 5
-    base_delay = 60  # 1 minute
+    account_id = get_account_id()
+    if not account_id:
+        return
 
-    for attempt in range(max_retries):
-        account_id = get_account_id()
-        if not account_id:
-            logging.error("Failed to get account ID")
-            return
+    headers = {
+        'Authorization': f'Zoho-oauthtoken {access_token}',
+        'Content-Type': 'application/json'
+    }
 
-        headers = {
-            'Authorization': f'Zoho-oauthtoken {access_token}',
-            'Content-Type': 'application/json'
-        }
+    email_data = {
+        'fromAddress': sender_email,
+        'toAddress': receiver_email,
+        'subject': subject,
+        'content': content
+    }
 
-        email_data = {
-            'fromAddress': sender_email,
-            'toAddress': receiver_email,
-            'subject': subject,
-            'content': content
-        }
+    response = requests.post(f'https://mail.zoho.com/api/accounts/{account_id}/messages', headers=headers, json=email_data)
 
-        try:
+    if response.status_code in [401, 404]:  # Unauthorized or Not Found
+        if refresh_access_token():
+            headers['Authorization'] = f'Zoho-oauthtoken {access_token}'
             response = requests.post(f'https://mail.zoho.com/api/accounts/{account_id}/messages', headers=headers, json=email_data)
 
-            if response.status_code == 200:
-                logging.info(f"Email sent successfully: {subject}")
-                return
-            elif response.status_code in [401, 404]:  # Unauthorized or Not Found
-                if refresh_access_token():
-                    continue  # Retry with new token
-                else:
-                    logging.error("Failed to refresh access token")
-                    return
-            else:
-                logging.error(f"Failed to send email (Attempt {attempt + 1}/{max_retries}): {response.content}")
-                
-                if "Unusual sending activity detected" in response.text:
-                    delay = base_delay * (2 ** attempt)  # Exponential backoff
-                    logging.info(f"Unusual activity detected. Waiting for {delay} seconds before retrying.")
-                    time.sleep(delay)
-                else:
-                    break  # Exit loop for other types of errors
-        except Exception as e:
-            logging.error(f"Exception occurred while sending email (Attempt {attempt + 1}/{max_retries}): {str(e)}")
-    
-    logging.error(f"Failed to send email after {max_retries} attempts: {subject}")
+    if response.status_code == 200:
+        logging.info(f"Email sent successfully: {subject}")
+    else:
+        logging.error(f"Failed to send email: {response.content}")
 
 def get_ups_data():
     try:
@@ -159,90 +109,17 @@ def get_ups_data():
         return None
 
 def check_internet():
-    global internet_status
     hosts = ['google.com', '1.1.1.1']
     for host in hosts:
         try:
             socket.create_connection((host, 80), timeout=5)
-            internet_status = True
-            return True
         except OSError:
             pass
-    internet_status = False
+        else:
+            return True
     return False
 
-class LogFileHandler(FileSystemEventHandler):
-    def __init__(self, log_file):
-        self.log_file = log_file
-        self.last_position = 0
-        self.reported_errors = set()  # Set to store hashes of reported errors
-
-    def on_modified(self, event):
-        if event.src_path == self.log_file:
-            self.check_for_errors()
-
-    def check_for_errors(self):
-        global internet_status
-        if not internet_status:
-            return  # Skip error checking if internet is out
-
-        with open(self.log_file, 'r') as file:
-            file.seek(self.last_position)
-            new_lines = file.readlines()
-            self.last_position = file.tell()
-
-        for line in new_lines:
-            if re.search(r'ERROR', line, re.IGNORECASE):
-                # Create a hash of the error message to use as a unique identifier
-                error_hash = hashlib.md5(line.encode()).hexdigest()
-                
-                # Check if this error has already been reported
-                if error_hash not in self.reported_errors:
-                    log_name = 'Main' if self.log_file == main_log_file else 'Bot'
-                    try:
-                        send_email(f"{log_name} Log Error Alert", f"An error was detected in the {log_name} log file:\n\n{line}")
-                        # Add the error hash to the set of reported errors
-                        self.reported_errors.add(error_hash)
-                    except Exception as e:
-                        logging.error(f"Failed to send error alert email: {str(e)}")
-                else:
-                    logging.info(f"Duplicate error detected, not sending email: {line.strip()}")
-
-    def clear_reported_errors(self):
-        """Clear the set of reported errors. Call this method periodically to allow re-reporting of errors."""
-        self.reported_errors.clear()
-
-def setup_log_monitoring():
-    main_handler = LogFileHandler(main_log_file)
-    bot_handler = LogFileHandler(bot_log_file)
-
-    observer = Observer()
-    observer.schedule(main_handler, path=os.path.dirname(main_log_file), recursive=False)
-    observer.schedule(bot_handler, path=os.path.dirname(bot_log_file), recursive=False)
-    observer.start()
-
-    return observer, main_handler, bot_handler
-
-def continuous_error_check(main_handler, bot_handler):
-    clear_interval = 3600  # Clear reported errors every hour
-    last_clear_time = time.time()
-
-    while True:
-        if internet_status:
-            main_handler.check_for_errors()
-            bot_handler.check_for_errors()
-
-        # Clear reported errors every hour
-        current_time = time.time()
-        if current_time - last_clear_time >= clear_interval:
-            main_handler.clear_reported_errors()
-            bot_handler.clear_reported_errors()
-            last_clear_time = current_time
-
-        time.sleep(60)  # Check for errors every minute
-
 def monitor_power_and_internet():
-    global internet_status
     power_out = False
     internet_out = False
     battery_low_alert_sent = False
@@ -317,16 +194,6 @@ def monitor_power_and_internet():
 
 if __name__ == "__main__":
     try:
-        log_observer, main_handler, bot_handler = setup_log_monitoring()
-        
-        # Start the continuous error checking in a separate thread
-        error_check_thread = threading.Thread(target=continuous_error_check, args=(main_handler, bot_handler))
-        error_check_thread.daemon = True
-        error_check_thread.start()
-
         monitor_power_and_internet()
     except Exception as e:
         logging.error(f"Unexpected error in monitoring script: {e}")
-    finally:
-        log_observer.stop()
-        log_observer.join()

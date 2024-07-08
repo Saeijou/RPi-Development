@@ -4,21 +4,23 @@ import asyncio
 import os
 import sys
 import logging
+import json
 import configparser
 
 # Read config
 config = configparser.ConfigParser()
 config.read(os.path.expanduser('~/Python/.config'))
 
-# Configure logging
-logging.basicConfig(filename=config['Paths']['bot_log_file'], level=logging.INFO,
-                    format='%(asctime)s:%(levelname)s:%(message)s')
-logger = logging.getLogger(__name__)
+# Get the cogs directory from config
+cogs_dir = config['Paths']['cogs_folder']
 
 # Add the 'games' directory to the Python path
-current_dir = os.path.dirname(os.path.abspath(__file__))
-games_dir = os.path.join(current_dir, 'games')
+games_dir = os.path.join(cogs_dir, 'games')
 sys.path.append(games_dir)
+
+# Set up logging
+logging.basicConfig(filename=config['Paths']['bot_log_file'], level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
 # Now import the Game class
 try:
@@ -35,7 +37,32 @@ class Cog(commands.Cog):
         self.games = {
             "1": ("Ruins of New York", Game)
         }
+        self.highscores_file = os.path.join(cogs_dir, 'json', 'highscores.json')
+        self.highscores = self.load_highscores()
         logger.info("Cog initialized")
+
+    def load_highscores(self):
+        if os.path.exists(self.highscores_file):
+            with open(self.highscores_file, 'r') as f:
+                return json.load(f)
+        return {}
+
+    def save_highscores(self):
+        with open(self.highscores_file, 'w') as f:
+            json.dump(self.highscores, f)
+
+    def update_highscore(self, game_name, player_id, player_name, score, guild_id):
+        if game_name not in self.highscores:
+            self.highscores[game_name] = {}
+        if str(guild_id) not in self.highscores[game_name]:
+            self.highscores[game_name][str(guild_id)] = {}
+        
+        player_scores = self.highscores[game_name][str(guild_id)]
+        if str(player_id) not in player_scores or score > player_scores[str(player_id)]['score']:
+            player_scores[str(player_id)] = {'name': player_name, 'score': score}
+            self.save_highscores()
+            return True
+        return False
 
     @commands.command()
     async def game(self, ctx):
@@ -47,20 +74,18 @@ class Cog(commands.Cog):
             return
 
         await ctx.send(f"Check your DMs to start a new game!")
-        await self.start_game_dialogue(ctx.author)
+        await self.start_game_dialogue(ctx.author, ctx.guild.id)
 
-    async def start_game_dialogue(self, player):
+    async def start_game_dialogue(self, player, guild_id):
         logger.info(f"Starting game dialogue for {player}")
-        # Display available games
         game_list = "\n".join([f"{key}. {name}" for key, (name, _) in self.games.items()])
         await player.send(f"Available games:\n{game_list}\nEnter the number of the game you want to play:")
 
+        def check(m):
+            return m.author == player and isinstance(m.channel, discord.DMChannel)
+
         try:
-            # Wait for the user's choice
-            choice_msg = await self.bot.wait_for('message', 
-                check=lambda m: m.author == player and isinstance(m.channel, discord.DMChannel), 
-                timeout=30.0
-            )
+            choice_msg = await self.bot.wait_for('message', check=check, timeout=30.0)
             choice = choice_msg.content
             logger.info(f"Player {player} chose game number: {choice}")
 
@@ -68,15 +93,10 @@ class Cog(commands.Cog):
                 game_name, game_class = self.games[choice]
                 await player.send(f"Starting {game_name}.")
                 
-                # Create a new game instance
                 game = game_class()
-                
-                # Store the game instance and player
-                self.active_games[player.id] = (game, player)
+                self.active_games[player.id] = (game, player, guild_id)
                 
                 logger.info(f"Starting game {game_name} for player {player}")
-                
-                # Start the game
                 await self.play_game(player)
             else:
                 await player.send("Invalid choice. Please use the .game command again and select a valid number.")
@@ -87,51 +107,58 @@ class Cog(commands.Cog):
 
     async def play_game(self, player):
         logger.info(f"Entering play_game method for player {player}")
-        game, _ = self.active_games[player.id]
+        game, _, guild_id = self.active_games[player.id]
         
-        # Send initial game message
         intro_message = game.play()
         logger.debug(f"Intro message: {intro_message}")
-        for line in intro_message.split('\n'):
-            await player.send(line)
-        
+        await player.send(intro_message)
         await player.send("Game started. You can now enter commands.")
         
-        while True:
+        def check(m):
+            return m.author == player and isinstance(m.channel, discord.DMChannel)
+
+        while not game.is_game_over:
             try:
-                # Wait for player's response
-                response = await self.bot.wait_for('message', 
-                    check=lambda m: m.author == player and isinstance(m.channel, discord.DMChannel), 
-                    timeout=300.0
-                )
+                response = await self.bot.wait_for('message', check=check, timeout=300.0)
                 
                 logger.debug(f"Received command from {player}: {response.content}")
-                
-                # Process the player's input
                 output = game.process_command(response.content)
-                
                 logger.debug(f"Game response for {player}: {output}")
                 
-                # Send the output in chunks to avoid hitting Discord's message length limit
-                for i in range(0, len(output), 2000):
-                    await player.send(output[i:i+2000])
+                await player.send(output)
                 
-                # Check if the game is over
-                if game.is_game_over:
-                    logger.info(f"Game over for {player}")
-                    break
             except asyncio.TimeoutError:
                 await player.send("Game timed out due to inactivity.")
                 logger.warning(f"Game timed out for {player}")
                 break
         
-        # Game is over, announce the score
-        await player.send(f"Game over! Your final score: {game.score} points.")
+        final_score = game.score
+        await player.send(f"Game over! Your final score: {final_score} points.")
         
-        # Remove the game from active games
+        game_name = self.games[next(key for key, value in self.games.items() if isinstance(game, value[1]))][0]
+        is_new_highscore = self.update_highscore(game_name, player.id, str(player), final_score, guild_id)
+        if is_new_highscore:
+            await player.send("Congratulations! You've set a new personal highscore!")
+        
         del self.active_games[player.id]
         logger.info(f"Removed game for {player} from active games")
 
+    @commands.command()
+    async def score(self, ctx):
+        """Display highscores for the server"""
+        guild_id = str(ctx.guild.id)
+        highscores_message = "Highscores:\n"
+        for game_name, guild_scores in self.highscores.items():
+            if guild_id in guild_scores:
+                highscores_message += f"\n{game_name}:\n"
+                sorted_scores = sorted(guild_scores[guild_id].items(), key=lambda x: x[1]['score'], reverse=True)
+                for i, (player_id, data) in enumerate(sorted_scores[:5], 1):
+                    highscores_message += f"{i}. {data['name']}: {data['score']} points\n"
+        
+        if highscores_message == "Highscores:\n":
+            await ctx.send("No highscores recorded for this server yet.")
+        else:
+            await ctx.send(highscores_message)
+
 async def setup(bot):
     await bot.add_cog(Cog(bot))
-    logger.info("Cog setup complete")

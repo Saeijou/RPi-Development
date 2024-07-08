@@ -1,3 +1,7 @@
+import logging
+
+logger = logging.getLogger(__name__)
+
 class Game:
     def __init__(self):
         self.locations = {
@@ -62,6 +66,9 @@ class Game:
         self.rat_people_distracted = False
         self.energy_drink_opened = False
         self.is_game_over = False
+        logger.info("Game initialized")
+        logger.debug(f"Initial location: {self.current_location}")
+        logger.debug(f"All locations: {list(self.locations.keys())}")
 
     def play(self):
         output = []
@@ -72,27 +79,163 @@ class Game:
         output.append(self.look())
         return "\n".join(output)
 
-    def look(self):
+    def process_command(self, command):
+        logger.info(f"Processing command: {command}")
+        command = command.lower().split()
+        if not command:
+            return "Please enter a command."
+
+        action = command[0]
+        logger.debug(f"Action: {action}")
+
+        if action in ["go", "move", "walk", "run", "exit", "leave", "enter"]:
+            direction = " ".join(command[1:]) if len(command) > 1 else ""
+            return self.go(direction)
+        elif action in self.locations[self.current_location]["exits"]:
+            return self.go(action)
+        elif action == "look":
+            return self.look()
+        elif action == "inventory":
+            return self.show_inventory()
+        elif action == "take":
+            if len(command) > 1:
+                return self.take(command[1])
+            else:
+                return "Take what?"
+        elif action == "examine":
+            if len(command) > 1:
+                return self.examine(" ".join(command[1:]))
+            else:
+                return "Examine what?"
+        elif action == "ride":
+            if len(command) > 1 and command[1] == "bicycle":
+                return self.ride_bicycle()
+            else:
+                return "Ride what?"
+        elif action == "read":
+            if len(command) > 1 and command[1] == "book":
+                return self.read_book()
+            else:
+                return "Read what?"
+        elif action in ["shake", "punch", "kick"]:
+            if len(command) > 1 and command[1] == "machine":
+                return self.interact_vending_machine()
+            else:
+                return f"{action.capitalize()} what?"
+        elif action == "open":
+            if len(command) > 1 and command[1] == "can":
+                return self.open_can()
+            else:
+                return "Open what?"
+        elif action == "drink":
+            if len(command) > 1 and command[1] == "can":
+                return self.drink_can()
+            else:
+                return "Drink what?"
+        elif action == "talk":
+            if len(command) > 2 and command[1] == "to":
+                return self.talk_to(" ".join(command[2:]))
+            else:
+                return "Talk to whom?"
+        elif action == "trade":
+            return self.trade()
+        elif action == "build":
+            if len(command) > 1 and command[1] == "generator":
+                return self.build_generator()
+            else:
+                return "Build what?"
+        elif action == "attach":
+            if len(command) > 3 and command[2] == "to":
+                return self.attach(command[1], " ".join(command[3:]))
+            else:
+                return "Attach what to what?"
+        elif action == "pedal":
+            if len(command) > 1 and command[1] == "bike":
+                return self.pedal_bike()
+            else:
+                return "Pedal what?"
+        elif action == "turn":
+            if len(command) > 2 and command[1] == "on" and command[2] == "computer":
+                return self.turn_on_computer()
+            else:
+                return "Turn on what?"
+        elif action == "insert":
+            if len(command) > 1 and command[1] == "floppy":
+                return self.insert_floppy()
+            else:
+                return "Insert what?"
+        elif action == "consult":
+            if len(command) > 3 and command[1] == "book" and command[2] == "about":
+                return self.consult_book(command[3])
+            else:
+                return "Consult what about what?"
+        elif action == "help":
+            return self.get_help()
+        elif action == "quit":
+            self.is_game_over = True
+            return f"You have quit the game. Your final score: {self.score}"
+        else:
+            return "I don't understand that command. Type 'help' for a list of commands."
+
+    def go(self, direction):
+        logger.info(f"Go method called with direction: {direction}")
         loc = self.locations[self.current_location]
-        output = loc["description"] + "\n"
+        logger.debug(f"Current location: {self.current_location}")
+        logger.debug(f"Available exits: {loc['exits']}")
+        
+        direction = direction.lower()
+        
+        # Check for exact match first
+        if direction in loc["exits"]:
+            new_location = loc["exits"][direction]
+            logger.debug(f"Exact match found. New location: {new_location}")
+        else:
+            # If no exact match, look for partial matches
+            matching_exits = [exit for exit in loc["exits"].keys() if direction in exit.lower()]
+            logger.debug(f"Matching exits: {matching_exits}")
+            if matching_exits:
+                # If there's only one match, use it
+                if len(matching_exits) == 1:
+                    new_location = loc["exits"][matching_exits[0]]
+                    logger.debug(f"Single partial match found. New location: {new_location}")
+                else:
+                    # If there are multiple matches, check if one contains all words
+                    direction_words = direction.split()
+                    full_matches = [exit for exit in matching_exits if all(word in exit.lower() for word in direction_words)]
+                    if full_matches:
+                        new_location = loc["exits"][full_matches[0]]
+                        logger.debug(f"Full partial match found. New location: {new_location}")
+                    else:
+                        logger.warning(f"Multiple partial matches found, but no full match for: {direction}")
+                        return f"Did you mean one of these: {', '.join(matching_exits)}?"
+            else:
+                logger.warning(f"No matching exit found for direction: {direction}")
+                return f"You can't go '{direction}'. Valid exits are: {', '.join(loc['exits'].keys())}"
+        
+        if new_location == "dark_tunnel" and not self.riding_bicycle and not self.rat_people_distracted:
+            logger.info("Prevented from entering dark tunnel due to danger")
+            return "The tunnel looks dangerous. You might need a quick way to escape if things go wrong."
+        
+        self.current_location = new_location
+        logger.info(f"Moved to new location: {self.current_location}")
+        return self.look()
+
+    def look(self):
+        logger.info(f"Look method called. Current location: {self.current_location}")
+        loc = self.locations[self.current_location]
+        output = f"You are in the {self.current_location}.\n"
+        output += loc["description"] + "\n"
         if loc["items"]:
             output += "You see: " + ", ".join(loc["items"]) + "\n"
         output += "Exits: " + ", ".join(loc["exits"].keys())
+        logger.debug(f"Look output: {output}")
         return output
 
-    def go(self, direction):
-        loc = self.locations[self.current_location]
-        if direction in loc["exits"]:
-            new_location = loc["exits"][direction]
-            if new_location == "dark_tunnel" and not self.riding_bicycle and not self.rat_people_distracted:
-                return "The tunnel looks dangerous. You might need a quick way to escape if things go wrong."
-            self.current_location = new_location
-            output = self.look()
-            if self.current_location == "dark_tunnel" and loc["rat_people"] and not self.rat_people_distracted:
-                output += "\n" + self.encounter_rat_people()
-            return output
+    def show_inventory(self):
+        if self.inventory:
+            return "You are carrying: " + ", ".join(self.inventory)
         else:
-            return "You can't go that way."
+            return "Your inventory is empty."
 
     def take(self, item):
         loc = self.locations[self.current_location]
@@ -197,10 +340,10 @@ class Game:
             self.generator_built = True
             self.score += 10
             return "Using the instructions from the book, you begin to assemble the generator...\n" + \
-                "You attach the drive belt to the bicycle's rear wheel and the motor...\n" + \
-                "Next, you connect the motor to the car battery using the jumper cables...\n" + \
-                "Finally, you run wires from the battery to the power inverter...\n" + \
-                "Success! You've built a bicycle-powered generator! Your score increased by 10 points."
+                   "You attach the drive belt to the bicycle's rear wheel and the motor...\n" + \
+                   "Next, you connect the motor to the car battery using the jumper cables...\n" + \
+                   "Finally, you run wires from the battery to the power inverter...\n" + \
+                   "Success! You've built a bicycle-powered generator! Your score increased by 10 points."
         else:
             missing_items = [item for item in required_items if item not in self.inventory]
             return f"You don't have all the necessary parts. You're missing: {', '.join(missing_items)}"
@@ -222,10 +365,10 @@ class Game:
                 self.score += 30
                 self.is_game_over = True
                 return "You flick a switch and the machine chirps, beeps and whirs...then reads the floppy disk inside its drive. The screen flashes with a message:\n" + \
-                    "WELCOME TO...ACTION CASTLE!\n" + \
-                    "YOU ARE STANDING IN A SMALL COTTAGE. THERE IS A FISHING POLE HERE. A DOOR LEADS OUTSIDE.\n" + \
-                    "Your score increased by 30 points.\n" + \
-                    "Congratulations! You've completed your journey and unlocked the secrets of the old world!"
+                       "WELCOME TO...ACTION CASTLE!\n" + \
+                       "YOU ARE STANDING IN A SMALL COTTAGE. THERE IS A FISHING POLE HERE. A DOOR LEADS OUTSIDE.\n" + \
+                       "Your score increased by 30 points.\n" + \
+                       "Congratulations! You've completed your journey and unlocked the secrets of the old world!"
             else:
                 return "You flick a switch and the machine chirps, beeps and whirs...but that's it."
         elif not self.computer_powered:
@@ -260,9 +403,6 @@ class Game:
         self.is_game_over = True
         return f"\n{message}\nGame Over! Your final score: {self.score}"
 
-    def is_game_over(self):
-        return self.score >= 100  # or whatever condition you want to use to end the game
-
     def get_help(self):
         return "\n".join([
             "Available commands:",
@@ -283,120 +423,10 @@ class Game:
             "turn on computer - Try to turn on the computer",
             "insert floppy - Insert the floppy disk into the computer",
             "consult book about [part] - Consult the book about a specific part",
-            "n, s, e, w, north, south, east, west - Move in a direction",
+            "go/move/walk/run [direction] - Move in a direction",
+            "[direction] - Move in a direction (e.g., 'north', 'out')",
             "quit - End the game"
         ])
-
-    async def play_discord(self, ctx):
-        await ctx.send("Welcome to the Ruins of New York!")
-        await ctx.send("In this post-apocalyptic adventure, you'll navigate through dangerous terrain,")
-        await ctx.send("solve puzzles, and uncover the secrets of the old world.")
-        await ctx.send("Type 'help' at any time for a list of commands.")
-        await ctx.send(self.look())
-
-    async def process_discord_command(self, ctx, command):
-        response = self.process_command(command)
-        await ctx.send(response)
-        if self.is_game_over:
-            await ctx.send(f"Game Over! Your final score: {self.score}")
-
-    def process_command(self, command):
-        command = command.lower().split()
-        if not command:
-            return "Please enter a command."
-
-        action = command[0]
-
-        if action == "quit":
-            self.is_game_over = True
-            return f"You have quit the game. Your final score: {self.score}"
-        elif action == "help":
-            return self.get_help()
-        elif action in ["n", "s", "e", "w", "north", "south", "east", "west"]:
-            return self.go(action)
-        elif action == "look":
-            return self.look()
-        elif action == "inventory":
-            return "You are carrying: " + ", ".join(self.inventory)
-        elif action == "take":
-            if len(command) > 1:
-                return self.take(command[1])
-            else:
-                return "Take what?"
-        elif action == "examine":
-            if len(command) > 1:
-                return self.examine(" ".join(command[1:]))
-            else:
-                return "Examine what?"
-        elif action == "ride":
-            if len(command) > 1 and command[1] == "bicycle":
-                return self.ride_bicycle()
-            else:
-                return "Ride what?"
-        elif action == "enter":
-            if len(command) > 1:
-                return self.go(" ".join(command))
-            else:
-                return "Enter where?"
-        elif action == "read":
-            if len(command) > 1 and command[1] == "book":
-                return self.read_book()
-            else:
-                return "Read what?"
-        elif action in ["shake", "punch", "kick"]:
-            if len(command) > 1 and command[1] == "machine":
-                return self.interact_vending_machine()
-            else:
-                return f"{action.capitalize()} what?"
-        elif action == "open":
-            if len(command) > 1 and command[1] == "can":
-                return self.open_can()
-            else:
-                return "Open what?"
-        elif action == "drink":
-            if len(command) > 1 and command[1] == "can":
-                return self.drink_can()
-            else:
-                return "Drink what?"
-        elif action == "talk":
-            if len(command) > 2 and command[1] == "to":
-                return self.talk_to(" ".join(command[2:]))
-            else:
-                return "Talk to whom?"
-        elif action == "trade":
-            return self.trade()
-        elif action == "build":
-            if len(command) > 1 and command[1] == "generator":
-                return self.build_generator()
-            else:
-                return "Build what?"
-        elif action == "attach":
-            if len(command) > 3 and command[2] == "to":
-                return self.attach(command[1], " ".join(command[3:]))
-            else:
-                return "Attach what to what?"
-        elif action == "pedal":
-            if len(command) > 1 and command[1] == "bike":
-                return self.pedal_bike()
-            else:
-                return "Pedal what?"
-        elif action == "turn":
-            if len(command) > 2 and command[1] == "on" and command[2] == "computer":
-                return self.turn_on_computer()
-            else:
-                return "Turn on what?"
-        elif action == "insert":
-            if len(command) > 1 and command[1] == "floppy":
-                return self.insert_floppy()
-            else:
-                return "Insert what?"
-        elif action == "consult":
-            if len(command) > 3 and command[1] == "book" and command[2] == "about":
-                return self.consult_book(command[3])
-            else:
-                return "Consult what about what?"
-        else:
-            return "I don't understand that command. Type 'help' for a list of commands."
 
 if __name__ == "__main__":
     game = Game()

@@ -16,7 +16,7 @@ bot = commands.Bot(command_prefix='.', intents=intents, help_command=None)
 COGS_DIR = config['Paths']['cogs_folder']
 
 # Configure logging
-logging.basicConfig(filename=config['Paths']['bot_log_file'], level=logging.INFO,
+logging.basicConfig(filename=config['Paths']['bot_log_file'], level=logging.DEBUG,
                     format='%(asctime)s:%(levelname)s:%(message)s')
 
 @bot.event

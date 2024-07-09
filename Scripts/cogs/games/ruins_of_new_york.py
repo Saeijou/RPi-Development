@@ -70,11 +70,12 @@ class Game:
         self.computer_powered = False
         self.floppy_disk = False
         self.rat_people_distracted = False
-        self.energy_drink_opened = False
         self.is_game_over = False
         self.save_used = False
         self.turns = 0
         self.max_turns = 100
+        self.shelves_examined = False
+        self.energy_drink_state = "closed"  # Can be "closed", "opened", or "empty"
         self.generator_parts = {
             "drive_belt": False,
             "motor": False,
@@ -338,6 +339,8 @@ class Game:
 
     def take(self, item):
         loc = self.locations[self.current_location]
+        if self.current_location == "store" and not self.shelves_examined:
+            return "You need to examine the shelves first to see what's available."
         if item in loc["items"]:
             loc["items"].remove(item)
             self.inventory.append(item)
@@ -354,8 +357,11 @@ class Game:
 
     def examine(self, item):
         loc = self.locations[self.current_location]
-        
-        if item in loc["items"] or item in self.inventory:
+
+        if item == "shelves" and self.current_location == "store":
+            self.shelves_examined = True
+            return "Amidst the trash you find the last remaining bag of CHEEZ-EEs and a book."
+        elif item in loc["items"] or item in self.inventory:
             if item == "bicycle":
                 return "The bike has seen better days but it's still usable—barely. The chain is rusted and some of the teeth on its gears are broken."
             elif item == "book":
@@ -374,6 +380,13 @@ class Game:
                 return "The bike is damaged beyond repair. The front wheel is warped from hitting the metal rails."
             elif item == "junk_pile" and self.current_location == "scrapyard":
                 return "You find some useful car parts in amongst the trash. There's an old motor, a car battery, a drive belt, jumper cables and wires. Alas, the car battery is dead."
+            elif item == "energy_drink":
+                if self.energy_drink_state == "closed":
+                    return "An unopened can of FLAMING GOAT! energy drink."
+                elif self.energy_drink_state == "opened":
+                    return "An opened can of FLAMING GOAT! energy drink."
+                else:
+                    return "An empty can of FLAMING GOAT! energy drink."
             elif item in ["motor", "car_battery", "drive_belt", "jumper_cables", "wires"] and self.current_location == "scrapyard":
                 return f"A {item} that could be useful for building something."
             else:
@@ -417,17 +430,25 @@ class Game:
 
     def open_can(self):
         if "energy_drink" in self.inventory:
-            self.energy_drink_opened = True
-            return "You pop the top of the can. It lets out a pleasant 'hssssss...'"
+            if self.energy_drink_state == "closed":
+                self.energy_drink_state = "opened"
+                return "You pop the top of the can. It lets out a pleasant 'hssssss...'"
+            elif self.energy_drink_state == "opened":
+                return "The can is already opened."
+            else:
+                return "The can is empty."
         else:
             return "You don't have an energy drink to open."
 
     def drink_can(self):
-        if "energy_drink" in self.inventory and self.energy_drink_opened:
-            self.inventory.remove("energy_drink")
-            return "It's warm and sugary sweet. You feel queasy, but invigorated."
-        elif "energy_drink" in self.inventory and not self.energy_drink_opened:
-            return "You need to open the can first."
+        if "energy_drink" in self.inventory:
+            if self.energy_drink_state == "closed":
+                return "You need to open the can first."
+            elif self.energy_drink_state == "opened":
+                self.energy_drink_state = "empty"
+                return "It's warm and sugary sweet. You feel queasy, but invigorated."
+            else:
+                return "The can is empty."
         else:
             return "You don't have an energy drink to drink."
 
@@ -442,16 +463,18 @@ class Game:
     def trade(self):
         if self.current_location == "market" and self.locations["market"]["mutant_leader"]:
             if "energy_drink" in self.inventory:
-                if self.energy_drink_opened:
+                if self.energy_drink_state == "empty":
                     self.inventory.remove("energy_drink")
                     self.floppy_disk = True
                     self.update_score(5, "Trading empty energy drink for floppy disk")
                     return "'Awww...it's empty. Well, take this.' The mutant leader gives you the floppy disk from around her neck and begins fastening the can to her headdress. Your score increased by 5 points."
-                else:
+                elif self.energy_drink_state == "closed":
                     self.inventory.remove("energy_drink")
                     self.floppy_disk = True
                     self.update_score(10, "Trading full energy drink for floppy disk")
                     return "'Unopened?! Amazing!' The mutant leader gives you her necklace and cracks open the soda for a refreshing treat. Your score increased by 10 points."
+                else:
+                    return "The mutant leader doesn't seem interested in your opened can."
             else:
                 return "You don't have anything to trade."
         else:
@@ -544,7 +567,7 @@ class Game:
             else:
                 return "You don't need to use the CHEEZ-EEs right now."
         elif item == "energy_drink" and "energy_drink" in self.inventory:
-            if self.energy_drink_opened:
+            if self.energy_drink_state == "opened":
                 return self.drink_can()
             else:
                 return self.open_can()

@@ -8,6 +8,7 @@ logger = logging.getLogger(__name__)
 
 class Game:
     def __init__(self):
+        self.config = self.load_config()
         self.locations = {
             "ruins": {
                 "description": "You stand amidst the RUINS OF NEWYORK: collapsed buildings, burned-out vehicles and broken streets surround you. There is a rusting bicycle here. You see a store here with cracked windows and a door that's still on its hinges. The street is mostly clear to the north.",
@@ -33,7 +34,7 @@ class Game:
             "platform": {
                 "description": "You are on a platform. There is a vending machine here. A stairway leads back up to the surface. A wrecked bike lies on the floor of the tunnel below you.",
                 "exits": {"up": "burning_canal"},
-                "items": ["wrecked_bike"],
+                "items": ["wrecked_bike", "vending_machine"],
                 "vending_machine": True
             },
             "burning_canal": {
@@ -50,12 +51,12 @@ class Game:
             "scrapyard": {
                 "description": "You're surrounded by carefully sorted and stacked piles of junk. Metal cans, glass bottles, plastic containers, bales of cardboard, discarded electronics, and junked cars. There is an unsorted junk pile here. You see a concrete bunker.",
                 "exits": {"out": "market", "enter bunker": "bunker"},
-                "items": ["motor", "car_battery", "drive_belt", "jumper_cables", "wires"]
+                "items": ["motor", "car_battery", "drive_belt", "jumper_cables", "wires", "junk_pile"]
             },
             "bunker": {
                 "description": "The bunker seems like a shrine to the Old World: posters of long-dead celebrities are on the walls and board games, plastic figurines and brightly colored boxes of cereal line the shelves. On a desk in the corner is a dusty old computer. A toolbox is here.",
                 "exits": {"out": "scrapyard"},
-                "items": ["toolbox"],
+                "items": ["toolbox", "computer", "power_inverter"],
                 "computer": True,
                 "power_inverter": True
             }
@@ -63,6 +64,7 @@ class Game:
         self.current_location = "ruins"
         self.inventory = []
         self.score = 0
+        self.score_reasons = []
         self.riding_bicycle = False
         self.generator_built = False
         self.computer_powered = False
@@ -70,8 +72,20 @@ class Game:
         self.rat_people_distracted = False
         self.energy_drink_opened = False
         self.is_game_over = False
-        self.config = self.load_config()
- 
+        self.save_used = False
+        self.turns = 0
+        self.max_turns = 100
+        self.generator_parts = {
+            "drive_belt": False,
+            "motor": False,
+            "battery": False,
+            "power_inverter": False,
+            "jumper_cables": False,
+            "wires": False
+        }
+        logger.debug(f"Loaded config in __init__: {self.config}")
+        logger.debug(f"Config sections in __init__: {self.config.sections()}")
+
     def load_config(self):
         config = configparser.ConfigParser()
         config_path = os.path.expanduser('~/Python/.config')
@@ -113,18 +127,12 @@ class Game:
             "message": "\n".join(output),
             "image_path": image_path
         }
-    
-    async def send_image(self, user, image_path):
-        try:
-            with open(image_path, 'rb') as f:
-                picture = discord.File(f)
-                await user.send(file=picture)
-        except Exception as e:
-            logger.error(f"Error sending image: {e}")
-            await user.send("Sorry, I couldn't send the image.")
-
 
     def process_command(self, command):
+        self.turns += 1
+        if self.turns >= self.max_turns:
+            return self.game_over("You've run out of time!")
+
         logger.info(f"Processing command: {command}")
         command = command.lower().split()
         if not command:
@@ -164,7 +172,7 @@ class Game:
                 return "Read what?"
         elif action in ["shake", "punch", "kick"]:
             if len(command) > 1 and command[1] == "machine":
-                return self.interact_vending_machine()
+                return self.interact_vending_machine(action)
             else:
                 return f"{action.capitalize()} what?"
         elif action == "open":
@@ -234,6 +242,14 @@ class Game:
                 return self.drop_item(command[1])
             else:
                 return "Drop what?"
+        elif action == "save":
+            return self.save_game()
+        elif action == "score":
+            return self.show_score()
+        elif action == "map":
+            return self.show_map()
+        elif action == "hint":
+            return self.get_hint()
         elif action == "help":
             return self.get_help()
         elif action == "quit":
@@ -277,13 +293,22 @@ class Game:
                 logger.warning(f"No matching exit found for direction: {direction}")
                 return f"You can't go '{direction}'. Valid exits are: {', '.join(loc['exits'].keys())}"
         
-        if new_location == "dark_tunnel" and not self.riding_bicycle and not self.rat_people_distracted:
-            logger.info("Prevented from entering dark tunnel due to danger")
-            return self.encounter_rat_people()
+        if new_location == "dark_tunnel":
+            return self.enter_dark_tunnel()
         
         self.current_location = new_location
         logger.info(f"Moved to new location: {self.current_location}")
         return self.look()
+
+    def enter_dark_tunnel(self):
+        if self.riding_bicycle:
+            self.current_location = "dark_tunnel"
+            return "You pedal through the dark tunnel as if your life depended on it—and it does! " + self.look()
+        elif self.rat_people_distracted:
+            self.current_location = "dark_tunnel"
+            return "You carefully sneak through the tunnel, the distracted rat people paying you no mind. " + self.look()
+        else:
+            return self.encounter_rat_people()
 
     def encounter_rat_people(self):
         output = "After traveling through the tunnel for what seems like forever, several hunched humanoid figures scramble from the darkness—you find yourself surrounded.\n"
@@ -291,9 +316,7 @@ class Game:
             output += "The rat people look hungry. Maybe you could distract them with something? (Hint: try 'throw bag' or 'use cheez-ees')"
         else:
             output += "The rat people advance, their chittering growing louder. You have no way to distract them!"
-            self.is_game_over = True
-            self.score -= 10
-            output += f"\nGame Over! Final score: {self.score}"
+            self.game_over("You've been overwhelmed by the rat people.")
         return output
 
     def look(self):
@@ -320,10 +343,10 @@ class Game:
             self.inventory.append(item)
             output = f"You picked up the {item}."
             if item == "cheez-ees":
-                self.score += 5
+                self.update_score(5, "Picking up CHEEZ-EEs")
                 output += " Your score increased by 5 points."
             elif item == "book":
-                self.score += 5
+                self.update_score(5, "Picking up the book")
                 output += " Your score increased by 5 points."
             return output
         else:
@@ -332,7 +355,6 @@ class Game:
     def examine(self, item):
         loc = self.locations[self.current_location]
         
-        # Check if the item is in the current location or inventory
         if item in loc["items"] or item in self.inventory:
             if item == "bicycle":
                 return "The bike has seen better days but it's still usable—barely. The chain is rusted and some of the teeth on its gears are broken."
@@ -340,18 +362,18 @@ class Game:
                 return "The book is entitled: 'How to Build Anything'. On the cover it shows someone pedaling a bike to generate electricity. That might be useful to know!"
             elif item == "cheez-ees":
                 return "The text on the unopened bag proclaims these are 'Delicious, crispy, cheese-shaped, cheese-flavored crackers.'"
-            elif item == "vending machine" and self.current_location == "platform":
+            elif item == "vending_machine" and self.current_location == "platform":
                 return "Pictures of fizzy drinks are on its side, as well as a cartoon goat. The battered and abused machine appears to be without power."
             elif item == "computer" and self.current_location == "bunker":
                 return "It's an ancient machine with a disk drive and a large, rounded glass monitor. It's plugged into a power inverter."
-            elif item == "power inverter" and self.current_location == "bunker":
+            elif item == "power_inverter" and self.current_location == "bunker":
                 return "An electrical device. If you could hook up a battery to it, you could use it battery to power this computer."
             elif item == "toolbox" and self.current_location == "bunker":
                 return "Yeah, you could build something with this. But what?"
             elif item == "wrecked_bike" and self.current_location == "platform":
                 return "The bike is damaged beyond repair. The front wheel is warped from hitting the metal rails."
-            elif item == "shelves" and self.current_location == "store":
-                return "Amidst the trash you find the last remaining bag of CHEEZ-EEs and a book."
+            elif item == "junk_pile" and self.current_location == "scrapyard":
+                return "You find some useful car parts in amongst the trash. There's an old motor, a car battery, a drive belt, jumper cables and wires. Alas, the car battery is dead."
             elif item in ["motor", "car_battery", "drive_belt", "jumper_cables", "wires"] and self.current_location == "scrapyard":
                 return f"A {item} that could be useful for building something."
             else:
@@ -364,8 +386,8 @@ class Game:
             return "Mutants. They wear armor forged from salvaged street signs and they carry various devices used to stab, slash, smash and crush. They are fearsome to behold but not overtly aggressive...yet."
         elif item == "leader" and self.current_location == "market":
             return "Her headdress is fashioned from yellow caution tape, spoons and old soda cans. Around her neck she wears a floppy disk on a string."
-        elif item == "junk pile" and self.current_location == "scrapyard":
-            return "You find some useful car parts in amongst the trash. There's an old motor, a car battery, a drive belt, jumper cables and wires. Alas, the car battery is dead."
+        elif item == "canal" and self.current_location == "burning_canal":
+            return "The water is a toxic soup, with patches of burning oil creating an eerie, dangerous atmosphere."
         else:
             return f"You don't see any {item} here to examine."
 
@@ -382,11 +404,14 @@ class Game:
         else:
             return "You don't have a book to read."
 
-    def interact_vending_machine(self):
-        if self.current_location == "platform" and self.locations["platform"]["vending_machine"]:
-            self.inventory.append("energy_drink")
-            self.score += 5
-            return "A can drops out of the machine. You've obtained a can of FLAMING GOAT! energy drink. Your score increased by 5 points."
+    def interact_vending_machine(self, action):
+        if self.current_location == "platform" and "vending_machine" in self.locations["platform"]["items"]:
+            if action in ["shake", "punch", "kick"]:
+                self.inventory.append("energy_drink")
+                self.update_score(5, "Getting energy drink from vending machine")
+                return f"You {action} the vending machine. A can drops out. You've obtained a can of FLAMING GOAT! energy drink. Your score increased by 5 points."
+            else:
+                return f"You can't {action} the vending machine."
         else:
             return "There's no vending machine here to interact with."
 
@@ -410,7 +435,7 @@ class Game:
         if person == "mutants" and self.current_location == "market":
             return "One of them steps forward. Based on her elaborate headdress, she appears to be the leader of the mutant tribe. 'Have you something to barter?'"
         elif person == "leader" and self.current_location == "market":
-            return "Her headdress is fashioned from yellow caution tape, spoons and old soda cans. Around her neck she wears a floppy disk on a string."
+            return "Her headdress is fashioned from yellow caution tape, spoons and old soda cans. Around her neck she wears a floppy disk on a string. She asks, 'An offering for The Great Oracle, perhaps?'"
         else:
             return f"There's no {person} here to talk to."
 
@@ -420,12 +445,12 @@ class Game:
                 if self.energy_drink_opened:
                     self.inventory.remove("energy_drink")
                     self.floppy_disk = True
-                    self.score += 5
+                    self.update_score(5, "Trading empty energy drink for floppy disk")
                     return "'Awww...it's empty. Well, take this.' The mutant leader gives you the floppy disk from around her neck and begins fastening the can to her headdress. Your score increased by 5 points."
                 else:
                     self.inventory.remove("energy_drink")
                     self.floppy_disk = True
-                    self.score += 10
+                    self.update_score(10, "Trading full energy drink for floppy disk")
                     return "'Unopened?! Amazing!' The mutant leader gives you her necklace and cracks open the soda for a refreshing treat. Your score increased by 10 points."
             else:
                 return "You don't have anything to trade."
@@ -433,44 +458,50 @@ class Game:
             return "There's no one here to trade with."
 
     def build_generator(self):
-        required_items = ["motor", "car_battery", "drive_belt", "jumper_cables", "wires", "bicycle"]
-        if all(item in self.inventory for item in required_items):
+        if all(self.generator_parts.values()):
             self.generator_built = True
-            self.score += 10
-            return "Using the instructions from the book, you begin to assemble the generator...\n" + \
-                   "You attach the drive belt to the bicycle's rear wheel and the motor...\n" + \
-                   "Next, you connect the motor to the car battery using the jumper cables...\n" + \
-                   "Finally, you run wires from the battery to the power inverter...\n" + \
-                   "Success! You've built a bicycle-powered generator! Your score increased by 10 points."
+            self.update_score(10, "Building the generator")
+            return "Success! You've built a bicycle-powered generator! Your score increased by 10 points."
         else:
-            missing_items = [item for item in required_items if item not in self.inventory]
-            return f"You don't have all the necessary parts. You're missing: {', '.join(missing_items)}"
+            missing_parts = [part for part, attached in self.generator_parts.items() if not attached]
+            return f"The generator is not complete. You still need to attach: {', '.join(missing_parts)}"
 
     def attach(self, item1, item2):
-        return f"You attach the {item1} to the {item2}."
+        if item1 in self.generator_parts and item1 in self.inventory:
+            if item2 in ["bicycle", "generator"]:
+                self.generator_parts[item1] = True
+                self.inventory.remove(item1)
+                return f"You've attached the {item1} to the {item2}."
+            else:
+                return f"You can't attach the {item1} to the {item2}."
+        else:
+            return f"You don't have a {item1} to attach."
 
     def pedal_bike(self):
         if self.generator_built:
             self.computer_powered = True
-            self.score += 10
+            self.update_score(10, "Powering up the computer")
             return "With some effort, you get the chain moving, which turns the motor and generates enough electricity to charge the battery. Your score increased by 10 points."
         else:
             return "You need to build the generator first."
 
     def turn_on_computer(self):
-        if self.current_location == "bunker" and self.computer_powered:
-            if self.floppy_disk:
-                self.score += 30
-                self.is_game_over = True
-                return "You flick a switch and the machine chirps, beeps and whirs...then reads the floppy disk inside its drive. The screen flashes with a message:\n" + \
-                       "WELCOME TO...ACTION CASTLE!\n" + \
-                       "YOU ARE STANDING IN A SMALL COTTAGE. THERE IS A FISHING POLE HERE. A DOOR LEADS OUTSIDE.\n" + \
-                       "Your score increased by 30 points.\n" + \
-                       "Congratulations! You've completed your journey and unlocked the secrets of the old world!"
+        if self.current_location == "bunker":
+            if self.computer_powered:
+                if self.floppy_disk:
+                    self.update_score(30, "Activating the computer with the floppy disk")
+                    if not self.save_used:
+                        self.update_score(5, "Completing the game without saving")
+                    self.is_game_over = True
+                    return "You flick a switch and the machine chirps, beeps and whirs...then reads the floppy disk inside its drive. The screen flashes with a message:\n" + \
+                           "WELCOME TO...ACTION CASTLE!\n" + \
+                           "YOU ARE STANDING IN A SMALL COTTAGE. THERE IS A FISHING POLE HERE. A DOOR LEADS OUTSIDE.\n" + \
+                           f"Your score increased by {30 if self.save_used else 35} points.\n" + \
+                           "Congratulations! You've completed your journey and unlocked the secrets of the old world!"
+                else:
+                    return "You flick a switch and the machine chirps, beeps and whirs...but that's it."
             else:
-                return "You flick a switch and the machine chirps, beeps and whirs...but that's it."
-        elif not self.computer_powered:
-            return "The computer has no power. You'll need to find a way to turn it on first."
+                return "The computer has no power. You'll need to find a way to turn it on first."
         else:
             return "There's no computer here to turn on."
 
@@ -484,30 +515,24 @@ class Game:
 
     def consult_book(self, part):
         if "book" in self.inventory:
-            return f"The {part} connects to another part."
+            if part in ["drive belt", "motor", "battery", "power inverter", "jumper cables", "wires", "crank"]:
+                return f"The book says: The {part} is an essential component of the generator."
+            else:
+                return f"The book doesn't have any specific information about {part}."
         else:
             return "You don't have the book to consult."
 
-    def encounter_rat_people(self):
-        output = "Suddenly, several hunched humanoid figures scramble from the darkness—you find yourself surrounded.\n"
-        if "cheez-ees" in self.inventory:
-            output += "Do you want to throw the CHEEZ-EEs? (yes/no)"
-            return output
-        else:
-            self.game_over("You've been overwhelmed by the rat people.")
-            return output + "The rat people advance, their chittering growing louder..."
-        
     def throw_bag(self):
         if "cheez-ees" in self.inventory and self.current_location == "dark_tunnel":
             self.inventory.remove("cheez-ees")
             self.rat_people_distracted = True
-            self.score += 15
-            return "The rat people scurry to collect their cheesy prize, turning their backs on you for a brief moment. You've successfully distracted them! Your score increased by 15 points."
+            self.update_score(15, "Distracting rat people")
+            return "The rat people scurry to collect their cheesy prize, turning their backs on you for a brief moment. You've successfully distracted them!"
         elif "cheez-ees" in self.inventory:
             return "You throw the bag of CHEEZ-EEs, but nothing happens. Maybe save it for when you really need it?"
         else:
             return "You don't have any CHEEZ-EEs to throw."
-        
+
     def use_item(self, item):
         if item == "bicycle" and "bicycle" in self.inventory:
             return self.ride_bicycle()
@@ -534,9 +559,54 @@ class Game:
         else:
             return f"You don't have a {item} to drop."
 
+    def save_game(self):
+        self.save_used = True
+        return "Game saved. Note that using save will reduce your final score."
+
+    def update_score(self, points, reason):
+        self.score += points
+        self.score_reasons.append(f"{reason}: {points} points")
+
+    def show_score(self):
+        output = f"Your current score is: {self.score}\n"
+        output += "Score breakdown:\n"
+        for reason in self.score_reasons:
+            output += f"- {reason}\n"
+        return output
+
+    def show_map(self):
+        map_text = """
+        Tunnel
+        Entrance
+        Dark Tunnel
+        Platform
+        Scrapyard
+        Market
+        Bunker
+        Ruins of
+        New York
+        Burning
+        Canal
+        Looted
+        Store
+        """
+        return map_text
+
+    def get_hint(self):
+        if self.current_location == "ruins":
+            return "Try examining and taking items you see. The bicycle might be useful later."
+        elif self.current_location == "dark_tunnel" and not self.rat_people_distracted:
+            return "The rat people look hungry. Maybe you have something to distract them?"
+        elif self.current_location == "market":
+            return "The mutant leader seems interested in trading. Do you have anything valuable?"
+        elif self.current_location == "bunker" and not self.computer_powered:
+            return "The computer needs power. Perhaps you could build something to generate electricity?"
+        else:
+            return "Keep exploring and examining items. The key to progress is often in the details."
+
     def game_over(self, message):
         self.is_game_over = True
-        return f"\n{message}\nGame Over! Your final score: {self.score}"
+        return f"\n{message}\nGame Over! Your final score: {self.score} (in {self.turns} turns)"
 
     def get_help(self):
         return "\n".join([
@@ -564,6 +634,10 @@ class Game:
             "consult book about [part] - Consult the book about a specific part",
             "go/move/walk/run [direction] - Move in a direction",
             "[direction] - Move in a direction (e.g., 'north', 'out')",
+            "save - Save your game (reduces final score)",
+            "score - Show your current score",
+            "map - Display a map of the game world",
+            "hint - Get a hint if you're stuck",
             "quit - End the game"
         ])
 

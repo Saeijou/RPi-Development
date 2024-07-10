@@ -31,7 +31,6 @@ async def on_command_error(ctx, error):
 @bot.event
 async def on_ready():
     logging.info(f'We have logged in as {bot.user}')
-    bot.loop.create_task(check_for_new_cogs())
 
 async def load_extensions():
     if os.path.exists(COGS_DIR) and os.path.isdir(COGS_DIR):
@@ -44,22 +43,6 @@ async def load_extensions():
                     logging.error(f"Failed to load extension {filename}: {e}")
     else:
         logging.error(f"Directory '{COGS_DIR}' does not exist")
-
-async def check_for_new_cogs():
-    while True:
-        if os.path.exists(COGS_DIR) and os.path.isdir(COGS_DIR):
-            cogs = set([f[:-3] for f in os.listdir(COGS_DIR) if f.endswith('.py')])
-            loaded_cogs = set([ext.split('.')[-1] for ext in bot.extensions])
-            new_cogs = cogs - loaded_cogs
-            for cog in new_cogs:
-                try:
-                    await bot.load_extension(f'cogs.{cog}')
-                    logging.info(f"Loaded new cog: {cog}")
-                except Exception as e:
-                    logging.error(f"Failed to load new cog {cog}: {e}")
-        else:
-            logging.error(f"Directory '{COGS_DIR}' does not exist")
-        await asyncio.sleep(60)  # Check every 60 seconds
 
 async def main():
     await load_extensions()

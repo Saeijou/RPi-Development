@@ -23,7 +23,7 @@ sender_email = config['Email']['sender_email']
 receiver_email = config['Email']['receiver_email']
 
 # Weather API settings
-WEATHER_API_KEY = config['Weather']['api_key']
+WEATHER_API_KEY = config['Weather']['API-KEY'].strip("[]")  # Remove square brackets if present
 LATITUDE = 38.6513  # Fair Oaks, CA latitude
 LONGITUDE = -121.2711  # Fair Oaks, CA longitude
 
